@@ -1,0 +1,241 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard | Northstar CRM{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_breadcrumb %}Workspace / Dashboard{% endblock %}
+{% block page_subtitle %}A calm view of your revenue momentum{% endblock %}
+
+{% block content %}
+<div class="dashboard-fit">
+    <section class="dash-card hero-compact">
+        <div>
+            <div class="page-kicker mb-1">Welcome back</div>
+            <h1 class="hero-compact-title">Revenue cockpit for your team.</h1>
+            <div class="hero-footnote">Today • {% now "l, d M Y" %}</div>
+        </div>
+        <div class="hero-actions compact-actions">
+            <a class="btn btn-primary btn-sm" href="{% url 'deals' %}"><i class="bi bi-plus-lg me-1"></i>New Deal</a>
+            <a class="btn btn-secondary btn-sm" href="{% url 'activities' %}"><i class="bi bi-activity me-1"></i>Log Activity</a>
+            <a class="btn btn-secondary btn-sm" href="{% url 'contacts' %}"><i class="bi bi-person-plus me-1"></i>Add Contact</a>
+        </div>
+    </section>
+
+    <section class="dash-card kpi-compact-grid">
+        <article class="kpi-mini">
+            <div class="mini-ring ring-1"><i class="bi bi-people"></i></div>
+            <div class="mini-value">{{ contacts_count }}</div>
+            <div class="mini-label">Contacts</div>
+        </article>
+        <article class="kpi-mini">
+            <div class="mini-ring ring-2"><i class="bi bi-person-badge"></i></div>
+            <div class="mini-value">{{ leads_count }}</div>
+            <div class="mini-label">Leads</div>
+        </article>
+        <article class="kpi-mini">
+            <div class="mini-ring ring-3"><i class="bi bi-cash-stack"></i></div>
+            <div class="mini-value">{{ deals_count }}</div>
+            <div class="mini-label">Deals</div>
+        </article>
+        <article class="kpi-mini">
+            <div class="mini-ring ring-4"><i class="bi bi-activity"></i></div>
+            <div class="mini-value">{{ activities_count }}</div>
+            <div class="mini-label">Activities</div>
+        </article>
+    </section>
+
+    <section class="dash-card chart-card">
+        <div class="panel-header mb-1">
+            <div>
+                <div class="section-title">Deal Value Trend</div>
+                <div class="section-subtitle">Latest deals from your database</div>
+            </div>
+            <span class="badge bg-primary-subtle text-primary">Pipeline {{ total_pipeline_value }}</span>
+        </div>
+        <div class="chart-wrap">
+            <canvas id="dashboardRevenueChart" height="150"></canvas>
+        </div>
+    </section>
+
+    <section class="dash-card timeline-compact-card">
+        <div class="panel-header mb-1">
+            <div>
+                <div class="section-title">Recent Contacts</div>
+                <div class="section-subtitle">Newest relationships added to CRM</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="{% url 'contacts' %}">All</a>
+        </div>
+        <div class="timeline-compact">
+            {% for contact in recent_contacts %}
+            <article class="timeline-row-compact">
+                <span class="dot"></span>
+                <div class="timeline-row-main">
+                    <div class="timeline-row-title">{{ contact.full_name|default:"-" }}</div>
+                    <div class="timeline-row-sub">{{ contact.email|default:contact.phone|default:"-" }}</div>
+                </div>
+                <span class="badge compact-badge bg-light text-dark">{{ contact.role|default:"Contact" }}</span>
+            </article>
+            {% empty %}
+            <div class="empty-state">No contacts available.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="dash-card timeline-compact-card">
+        <div class="panel-header mb-1">
+            <div>
+                <div class="section-title">Activity Timeline</div>
+                <div class="section-subtitle">Latest touchpoints</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="{% url 'activities' %}">All</a>
+        </div>
+        <div class="timeline-compact">
+            {% for activity in recent_activities %}
+            <article class="timeline-row-compact">
+                <span class="dot"></span>
+                <div class="timeline-row-main">
+                    <div class="timeline-row-title">{% if activity.body %}{{ activity.body }}{% elif activity.outcome %}{{ activity.outcome }}{% else %}Activity {{ activity.id }}{% endif %}</div>
+                    <div class="timeline-row-sub">{{ activity.occurred_at|default:"No date" }}</div>
+                </div>
+                <span class="badge compact-badge bg-primary-subtle text-primary">{{ activity.direction|default:"Record" }}</span>
+            </article>
+            {% empty %}
+            <div class="empty-state">No recent activity.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="dash-card timeline-compact-card">
+        <div class="panel-header mb-1">
+            <div>
+                <div class="section-title">Latest Leads</div>
+                <div class="section-subtitle">Fresh opportunities entering pipeline</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="{% url 'leads' %}">All</a>
+        </div>
+        <div class="timeline-compact">
+            {% for lead in recent_leads %}
+            <article class="timeline-row-compact">
+                <span class="dot"></span>
+                <div class="timeline-row-main">
+                    <div class="timeline-row-title">{{ lead.full_name|default:"-" }}</div>
+                    <div class="timeline-row-sub">{{ lead.normalized_email|default:lead.normalized_phone|default:"-" }}</div>
+                </div>
+                <span class="badge compact-badge bg-light text-dark">{{ lead.created_at|default:"-" }}</span>
+            </article>
+            {% empty %}
+            <div class="empty-state">No leads available.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="dash-card agenda-card-pro">
+        <div class="panel-header mb-1">
+            <div>
+                <div class="section-title">Upcoming Follow-ups</div>
+                <div class="section-subtitle">Tasks ordered by due date</div>
+            </div>
+            <a class="btn btn-secondary btn-sm" href="{% url 'tasks' %}">Tasks</a>
+        </div>
+        <div class="agenda-pro-list">
+            {% for task in upcoming_followups %}
+            <article class="agenda-pro-item">
+                <div class="agenda-pro-main">
+                    <div class="agenda-pro-title">{{ task.title|default:"-" }}</div>
+                    <div class="agenda-pro-sub">{{ task.description|default:"-" }}</div>
+                </div>
+                <span class="badge compact-badge bg-warning-subtle text-warning">{{ task.due_at|default:"No due date" }}</span>
+            </article>
+            {% empty %}
+            <div class="empty-state">No follow-up tasks available.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="dash-card timeline-compact-card">
+        <div class="panel-header mb-1">
+            <div>
+                <div class="section-title">Sales Summary</div>
+                <div class="section-subtitle">Database-backed performance snapshot</div>
+            </div>
+        </div>
+        <div class="timeline-compact">
+            <article class="timeline-row-compact">
+                <span class="dot"></span>
+                <div class="timeline-row-main">
+                    <div class="timeline-row-title">Total Pipeline Value</div>
+                    <div class="timeline-row-sub">Based on expected or won amounts</div>
+                </div>
+                <span class="badge compact-badge bg-primary-subtle text-primary">{{ total_pipeline_value }}</span>
+            </article>
+            <article class="timeline-row-compact">
+                <span class="dot"></span>
+                <div class="timeline-row-main"><div class="timeline-row-title">Open Activities</div></div>
+                <span class="badge compact-badge bg-light text-dark">{{ activities_count }}</span>
+            </article>
+            <article class="timeline-row-compact">
+                <span class="dot"></span>
+                <div class="timeline-row-main"><div class="timeline-row-title">Open Tickets</div></div>
+                <span class="badge compact-badge bg-light text-dark">{{ tickets_count }}</span>
+            </article>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+    (function () {
+        const canvas = document.getElementById('dashboardRevenueChart');
+        if (!canvas || typeof Chart === 'undefined') {
+            return;
+        }
+
+        const labels = JSON.parse('{{ chart_labels_json|escapejs }}');
+        const points = JSON.parse('{{ chart_values_json|escapejs }}');
+
+        if (!Array.isArray(labels) || !Array.isArray(points) || !labels.length || !points.length) {
+            return;
+        }
+
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                datasets: [{
+                    label: 'Deal Value',
+                    data: points,
+                    tension: 0.42,
+                    fill: true,
+                    borderWidth: 3,
+                    borderColor: '#0D6EFD',
+                    pointRadius: 0,
+                    backgroundColor: 'rgba(13,110,253,0.12)'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#0A2240',
+                        titleColor: '#fff',
+                        bodyColor: '#fff'
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#6B7280', font: { size: 11 } }
+                    },
+                    y: {
+                        grid: { color: 'rgba(13,110,253,0.08)' },
+                        ticks: { color: '#6B7280', font: { size: 11 } }
+                    }
+                }
+            }
+        });
+    })();
+</script>
+{% endblock %}

@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+
+{% block title %}Tasks | Northstar CRM{% endblock %}
+{% block page_title %}Tasks{% endblock %}
+{% block page_breadcrumb %}Workspace / Tasks{% endblock %}
+{% block page_subtitle %}Stay on top of execution{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div>
+        <p class="text-muted mb-1">Execution</p>
+        <h2 class="page-title mb-0">Tasks</h2>
+    </div>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#taskFormModal">
+        <i class="bi bi-plus-lg me-2"></i>New Task
+    </button>
+</div>
+
+<div class="modal fade" id="taskFormModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create task</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2"><label class="form-label">Title</label><input class="form-control" name="title"></div>
+                    <div class="mb-2"><label class="form-label">Description</label><textarea class="form-control" name="description"></textarea></div>
+                    <div class="mb-2"><label class="form-label">Due date</label><input class="form-control" name="due_at"></div>
+                    <div class="mb-2"><label class="form-label">Outcome</label><input class="form-control" name="outcome"></div>
+                    <div class="mb-2"><label class="form-label">Assignee</label><input class="form-control" name="assignee_id"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="card list-card">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end mb-2">
+            <div class="col-md-8">
+                <label class="form-label text-muted">Search tasks</label>
+                <input type="text" class="form-control" name="q" value="{{ query }}" placeholder="Search by title, description or outcome">
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search me-2"></i>Search
+                </button>
+            </div>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Description</th>
+                        <th>Due Date</th>
+                        <th>Priority</th>
+                        <th>Status</th>
+                        <th>Assigned User</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in task_list %}
+                    {% with task=item.row details=item.details %}
+                    <tr>
+                        <td>
+                            <div class="fw-semibold">{{ details.title }}</div>
+                        </td>
+                        <td>{{ details.description }}</td>
+                        <td>{{ details.due_date }}</td>
+                        <td>{{ details.priority }}</td>
+                        <td>
+                            <span class="badge bg-success-subtle text-success">{{ details.status }}</span>
+                        </td>
+                        <td>{{ details.assigned_user }}</td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#taskModal{{ task.id }}">
+                                <i class="bi bi-eye me-1"></i>View
+                            </button>
+                        </td>
+                    </tr>
+
+                    <div class="modal fade" id="taskModal{{ task.id }}" tabindex="-1" aria-labelledby="taskModalLabel{{ task.id }}" aria-hidden="true">
+                        <div class="modal-dialog modal-xl modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header modal-header-crm">
+                                    <div class="d-flex align-items-start justify-content-between w-100 gap-2">
+                                        <div>
+                                            <h5 class="modal-title modal-title-crm" id="taskModalLabel{{ task.id }}">{{ details.title }}</h5>
+                                            <div class="modal-role">{{ details.due_date }}</div>
+                                        </div>
+                                        <div class="d-flex flex-column align-items-end gap-2 text-end">
+                                            <span class="badge crm-badge bg-primary-subtle text-primary">{{ details.status }}</span>
+                                            <div class="modal-meta">{{ details.priority }}</div>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body modal-body-crm p-2 p-md-2">
+                                    <ul class="nav nav-tabs nav-tabs-crm" role="tablist">
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#taskInfo{{ task.id }}" type="button" role="tab"><i class="bi bi-list-check me-1"></i>Task Details</button>
+                                        </li>
+                                    </ul>
+
+                                    <div class="tab-content tab-content-crm p-2 p-md-2">
+                                        <div class="tab-pane fade show active" id="taskInfo{{ task.id }}" role="tabpanel">
+                                            <div class="card border-0 crm-panel-card">
+                                                <div class="card-body p-2 p-md-2">
+                                                    <div class="row g-2 align-items-stretch">
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Title</div>
+                                                                <div class="crm-field-value">{{ details.title }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Description</div>
+                                                                <div class="crm-field-value">{{ details.description }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Due Date</div>
+                                                                <div class="crm-field-value">{{ details.due_date }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Priority</div>
+                                                                <div class="crm-field-value">{{ details.priority }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Status</div>
+                                                                <div class="crm-field-value">{{ details.status }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Assigned User</div>
+                                                                <div class="crm-field-value">{{ details.assigned_user }}</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endwith %}
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-2">No tasks found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% include 'includes/compact_pagination.html' with aria_label='Tasks pagination' %}
+    </div>
+</div>
+{% endblock %}

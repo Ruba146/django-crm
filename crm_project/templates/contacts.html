@@ -1,0 +1,348 @@
+{% extends 'base.html' %}
+
+{% block title %}Contacts | Northstar CRM{% endblock %}
+{% block page_title %}Contacts{% endblock %}
+{% block page_breadcrumb %}Workspace / Contacts{% endblock %}
+{% block page_subtitle %}A refined directory for every relationship{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div>
+        <p class="text-muted mb-1">Directory</p>
+        <h2 class="page-title mb-0">Contacts</h2>
+    </div>
+</div>
+
+<div class="card list-card">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end mb-2">
+            <div class="col-md-8">
+                <label class="form-label text-muted">Search contacts</label>
+                <input type="text" class="form-control" name="q" value="{{ query }}" placeholder="Search by name, role, phone, email or notes">
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search me-2"></i>Search
+                </button>
+            </div>
+        </form>
+
+        <div class="contact-grid">
+            {% for item in contact_list %}
+            {% with contact=item.contact details=item.details %}
+            <article class="contact-card">
+                <div class="contact-card-head">
+                    <div class="contact-avatar">
+                        {% if contact.full_name %}{{ contact.full_name|slice:":1"|upper }}{% else %}C{% endif %}
+                    </div>
+                    <div>
+                        <h5 class="mb-1">{% if contact.full_name %}{{ contact.full_name }}{% else %}Unnamed contact{% endif %}</h5>
+                        <div class="section-subtitle">{% if details.company_name %}{{ details.company_name }}{% else %}Independent{% endif %}</div>
+                    </div>
+                </div>
+
+                <div class="contact-meta-list">
+                    <div><i class="bi bi-telephone"></i><span>{% if contact.phone %}{{ contact.phone }}{% else %}No phone{% endif %}</span></div>
+                    <div><i class="bi bi-envelope"></i><span>{% if contact.email %}{{ contact.email }}{% else %}No email{% endif %}</span></div>
+                    <div><i class="bi bi-clock-history"></i><span>{% if contact.updated_at %}{{ contact.updated_at }}{% else %}No recent update{% endif %}</span></div>
+                </div>
+
+                <div class="contact-tags">
+                    {% if details.status and details.status != '-' and details.status != 'None' %}
+                    <span class="crm-badge bg-primary-subtle text-primary">{{ details.status }}</span>
+                    {% endif %}
+                    {% if contact.role and contact.role != '-' and contact.role != 'None' %}
+                    <span class="tag-pill">{{ contact.role }}</span>
+                    {% endif %}
+                    {% if contact.preferred_channel and contact.preferred_channel != '-' and contact.preferred_channel != 'None' %}
+                    <span class="tag-pill">{{ contact.preferred_channel }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="contact-footer">
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#contactModal{{ contact.id }}">
+                        <i class="bi bi-eye me-1"></i>Profile
+                    </button>
+                </div>
+            </article>
+
+            <div class="modal fade" id="contactModal{{ contact.id }}" tabindex="-1" aria-labelledby="contactModalLabel{{ contact.id }}" aria-hidden="true">
+                        <div class="modal-dialog modal-xl modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header modal-header-crm">
+                                    <div class="d-flex align-items-start justify-content-between w-100 gap-2">
+                                        <div>
+                                            <h5 class="modal-title modal-title-crm" id="contactModalLabel{{ contact.id }}">{% if contact.full_name %}{{ contact.full_name }}{% else %}Contact{% endif %}</h5>
+                                            <div class="modal-role">{% if contact.role %}{{ contact.role }}{% else %}Contact{% endif %}</div>
+                                        </div>
+                                        <div class="d-flex flex-column align-items-end gap-2 text-end">
+                                            {% if details.status and details.status != '-' and details.status != 'None' %}
+                                            <span class="badge crm-badge {% if details.status|lower == 'open' or details.status|lower == 'active' or details.status|lower == 'won' or details.status|lower == 'completed' %}bg-success-subtle text-success{% elif details.status|lower == 'pending' or details.status|lower == 'in progress' or details.status|lower == 'review' %}bg-warning-subtle text-warning{% elif details.status|lower == 'lost' or details.status|lower == 'closed' or details.status|lower == 'cancelled' %}bg-danger-subtle text-danger{% elif details.status|lower == 'outbound' or details.status|lower == 'inbound' %}bg-primary-subtle text-primary{% else %}bg-secondary-subtle text-secondary{% endif %}">{{ details.status }}</span>
+                                            {% endif %}
+                                            {% if contact.phone and contact.phone != '-' and contact.phone != 'None' %}
+                                            <div class="modal-meta">📞 {{ contact.phone }}</div>
+                                            {% endif %}
+                                            {% if details.company_name and details.company_name != '-' and details.company_name != 'None' %}
+                                            <div class="modal-meta">🏢 {{ details.company_name }}</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body modal-body-crm p-2 p-md-2">
+                                    <ul class="nav nav-tabs nav-tabs-crm" id="contactTabs{{ contact.id }}" role="tablist">
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link active" id="info-tab{{ contact.id }}" data-bs-toggle="tab" data-bs-target="#info{{ contact.id }}" type="button" role="tab"><i class="bi bi-person-lines-fill me-1"></i>Contact Info</button>
+                                        </li>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link" id="activities-tab{{ contact.id }}" data-bs-toggle="tab" data-bs-target="#activities{{ contact.id }}" type="button" role="tab"><i class="bi bi-telephone me-1"></i>Activities</button>
+                                        </li>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link" id="deals-tab{{ contact.id }}" data-bs-toggle="tab" data-bs-target="#deals{{ contact.id }}" type="button" role="tab"><i class="bi bi-briefcase me-1"></i>Deals</button>
+                                        </li>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link" id="tasks-tab{{ contact.id }}" data-bs-toggle="tab" data-bs-target="#tasks{{ contact.id }}" type="button" role="tab"><i class="bi bi-check2-square me-1"></i>Tasks</button>
+                                        </li>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link" id="notes-tab{{ contact.id }}" data-bs-toggle="tab" data-bs-target="#notes{{ contact.id }}" type="button" role="tab"><i class="bi bi-sticky me-1"></i>Notes</button>
+                                        </li>
+                                    </ul>
+
+                                    <div class="tab-content tab-content-crm p-2 p-md-2">
+                                        <div class="tab-pane fade show active" id="info{{ contact.id }}" role="tabpanel">
+                                            <div class="card border-0 crm-panel-card">
+                                                <div class="card-body p-2 p-md-2">
+                                                    <div class="row g-2 align-items-stretch">
+                                                        {% if contact.full_name and contact.full_name != '-' and contact.full_name != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Full Name</div>
+                                                                <div class="crm-field-value">{{ contact.full_name }}</div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if contact.role and contact.role != '-' and contact.role != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Role</div>
+                                                                <div class="crm-field-value">{{ contact.role }}</div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if details.company_name and details.company_name != '-' and details.company_name != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Company</div>
+                                                                <div class="crm-field-value">{{ details.company_name }}</div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if contact.phone and contact.phone != '-' and contact.phone != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Phone</div>
+                                                                <div class="crm-field-value">{{ contact.phone }}</div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if contact.email and contact.email != '-' and contact.email != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Email</div>
+                                                                <div class="crm-field-value">{{ contact.email }}</div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if contact.preferred_channel and contact.preferred_channel != '-' and contact.preferred_channel != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Preferred Channel</div>
+                                                                <div class="crm-field-value">{{ contact.preferred_channel }}</div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if details.status and details.status != '-' and details.status != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Status</div>
+                                                                <div class="crm-field-value">
+                                                                    {% with status_value=details.status %}
+                                                                    <span class="badge crm-badge {% if status_value|lower == 'open' or status_value|lower == 'active' or status_value|lower == 'won' or status_value|lower == 'completed' %}bg-success-subtle text-success{% elif status_value|lower == 'pending' or status_value|lower == 'in progress' or status_value|lower == 'review' %}bg-warning-subtle text-warning{% elif status_value|lower == 'lost' or status_value|lower == 'closed' or status_value|lower == 'cancelled' %}bg-danger-subtle text-danger{% elif status_value|lower == 'outbound' or status_value|lower == 'inbound' %}bg-primary-subtle text-primary{% else %}bg-secondary-subtle text-secondary{% endif %}">{{ status_value }}</span>
+                                                                    {% endwith %}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if contact.notes and contact.notes != '-' and contact.notes != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Notes</div>
+                                                                <div class="crm-field-value">{{ contact.notes }}</div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if contact.created_at and contact.created_at != '-' and contact.created_at != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Created At</div>
+                                                                <div class="crm-field-value">
+                                                                    <div>{{ contact.created_at|date:"d M Y" }}</div>
+                                                                    <div class="crm-field-meta">{{ contact.created_at|time:"H:i" }}</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if contact.updated_at and contact.updated_at != '-' and contact.updated_at != 'None' %}
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Updated At</div>
+                                                                <div class="crm-field-value">
+                                                                    <div>{{ contact.updated_at|date:"d M Y" }}</div>
+                                                                    <div class="crm-field-meta">{{ contact.updated_at|time:"H:i" }}</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="tab-pane fade" id="activities{{ contact.id }}" role="tabpanel">
+                                            {% if details.activities %}
+                                            {% for activity in details.activities %}
+                                            <div class="card border-0 crm-panel-card crm-card-compact mb-2">
+                                                <div class="card-body p-2">
+                                                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                                        <div class="d-flex align-items-center gap-2">
+                                                            <div class="crm-icon-pill"><i class="bi bi-telephone"></i></div>
+                                                            <div>
+                                                                <div class="crm-section-title">{{ activity.activity_type }}</div>
+                                                                <div class="crm-field-meta">{{ activity.date|date:"d M Y" }} • {{ activity.date|time:"H:i" }}</div>
+                                                            </div>
+                                                        </div>
+                                                        {% if activity.direction and activity.direction != '-' and activity.direction != 'None' %}
+                                                        <span class="badge crm-badge {% if activity.direction|lower == 'outbound' %}bg-primary-subtle text-primary{% elif activity.direction|lower == 'inbound' %}bg-info-subtle text-info{% else %}bg-secondary-subtle text-secondary{% endif %}">{{ activity.direction }}</span>
+                                                        {% endif %}
+                                                    </div>
+                                                    {% if activity.description and activity.description != '-' and activity.description != 'None' %}
+                                                    <div class="crm-card-text">{{ activity.description }}</div>
+                                                    {% endif %}
+                                                    {% if activity.outcome and activity.outcome != '-' and activity.outcome != 'None' %}
+                                                    <div class="crm-card-footnote">Outcome: {{ activity.outcome }}</div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                            {% else %}
+                                            <div class="text-muted">No activities found for this contact.</div>
+                                            {% endif %}
+                                        </div>
+
+                                        <div class="tab-pane fade" id="deals{{ contact.id }}" role="tabpanel">
+                                            {% if details.deals %}
+                                            {% for deal in details.deals %}
+                                            <div class="card border-0 crm-panel-card crm-card-compact mb-2">
+                                                <div class="card-body p-2">
+                                                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                                        <div>
+                                                            <div class="crm-section-title"><i class="bi bi-briefcase"></i> {{ deal.name }}</div>
+                                                            <div class="crm-field-meta">{{ deal.stage }}</div>
+                                                        </div>
+                                                        {% if deal.status and deal.status != '-' and deal.status != 'None' %}
+                                                        <span class="badge crm-badge {% if deal.status|lower == 'open' or deal.status|lower == 'won' %}bg-success-subtle text-success{% elif deal.status|lower == 'pending' or deal.status|lower == 'in progress' %}bg-warning-subtle text-warning{% elif deal.status|lower == 'lost' or deal.status|lower == 'closed' %}bg-danger-subtle text-danger{% else %}bg-secondary-subtle text-secondary{% endif %}">{{ deal.status }}</span>
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="row g-2">
+                                                        {% if deal.amount and deal.amount != '-' and deal.amount != 'None' %}
+                                                        <div class="col-12 col-sm-6 col-lg-3">
+                                                            <div class="crm-detail-pill"><span class="crm-detail-label">Amount</span><span class="crm-detail-value">{{ deal.amount }}</span></div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if deal.currency and deal.currency != '-' and deal.currency != 'None' %}
+                                                        <div class="col-12 col-sm-6 col-lg-3">
+                                                            <div class="crm-detail-pill"><span class="crm-detail-label">Currency</span><span class="crm-detail-value">{{ deal.currency }}</span></div>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% if deal.close_date and deal.close_date != '-' and deal.close_date != 'None' %}
+                                                        <div class="col-12 col-sm-6 col-lg-3">
+                                                            <div class="crm-detail-pill"><span class="crm-detail-label">Close date</span><span class="crm-detail-value">{{ deal.close_date|date:"d M Y" }}</span></div>
+                                                        </div>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                            {% else %}
+                                            <div class="text-muted">No deals found for this contact.</div>
+                                            {% endif %}
+                                        </div>
+
+                                        <div class="tab-pane fade" id="tasks{{ contact.id }}" role="tabpanel">
+                                            {% if details.tasks %}
+                                            {% for task in details.tasks %}
+                                            <div class="card border-0 crm-panel-card crm-card-compact mb-2">
+                                                <div class="card-body p-2">
+                                                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                                        <div>
+                                                            <div class="crm-section-title"><i class="bi bi-check2-square"></i> {{ task.title }}</div>
+                                                            <div class="crm-field-meta">Due: {{ task.due_date|date:"d M Y" }}</div>
+                                                        </div>
+                                                        <div class="d-flex flex-column gap-1 align-items-end">
+                                                            {% if task.status and task.status != '-' and task.status != 'None' %}
+                                                            <span class="badge crm-badge {% if task.status|lower == 'completed' or task.status|lower == 'done' %}bg-success-subtle text-success{% elif task.status|lower == 'pending' or task.status|lower == 'in progress' %}bg-warning-subtle text-warning{% else %}bg-secondary-subtle text-secondary{% endif %}">{{ task.status }}</span>
+                                                            {% endif %}
+                                                            {% if task.priority and task.priority != '-' and task.priority != 'None' %}
+                                                            <span class="badge crm-badge bg-light text-dark">{{ task.priority }}</span>
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                    {% if task.description and task.description != '-' and task.description != 'None' %}
+                                                    <div class="crm-card-text">{{ task.description }}</div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                            {% else %}
+                                            <div class="text-muted">No tasks found for this contact.</div>
+                                            {% endif %}
+                                        </div>
+
+                                        <div class="tab-pane fade" id="notes{{ contact.id }}" role="tabpanel">
+                                            {% if details.notes %}
+                                            {% for note in details.notes %}
+                                            <div class="card border-0 crm-panel-card crm-card-compact mb-2">
+                                                <div class="card-body p-2">
+                                                    <div class="d-flex justify-content-between align-items-start gap-2">
+                                                        <div class="flex-grow-1">
+                                                            <div class="crm-section-title"><i class="bi bi-sticky"></i> Note</div>
+                                                            {% if note.body and note.body != '-' and note.body != 'None' %}
+                                                            <div class="crm-card-text">{{ note.body }}</div>
+                                                            {% endif %}
+                                                        </div>
+                                                        {% if note.date and note.date != '-' and note.date != 'None' %}
+                                                        <div class="crm-field-meta text-nowrap">{{ note.date|date:"d M Y" }}</div>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                            {% else %}
+                                            <div class="text-muted">No notes found for this contact.</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endwith %}
+            {% empty %}
+            <div class="empty-state text-center py-2">No contacts found.</div>
+            {% endfor %}
+        </div>
+
+        {% include 'includes/compact_pagination.html' with aria_label='Contacts pagination' %}
+    </div>
+</div>
+{% endblock %}

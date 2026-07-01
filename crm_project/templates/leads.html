@@ -1,0 +1,200 @@
+{% extends 'base.html' %}
+
+{% block title %}Leads | Northstar CRM{% endblock %}
+{% block page_title %}Leads{% endblock %}
+{% block page_breadcrumb %}Workspace / Leads{% endblock %}
+{% block page_subtitle %}Prioritize opportunities with clarity{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div>
+        <p class="text-muted mb-1">Pipeline</p>
+        <h2 class="page-title mb-0">Leads</h2>
+    </div>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#leadFormModal">
+        <i class="bi bi-plus-lg me-2"></i>New Lead
+    </button>
+</div>
+
+<div class="modal fade" id="leadFormModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create lead</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2"><label class="form-label">Full name</label><input class="form-control" name="full_name"></div>
+                    <div class="mb-2"><label class="form-label">Phone</label><input class="form-control" name="normalized_phone"></div>
+                    <div class="mb-2"><label class="form-label">Email</label><input class="form-control" name="normalized_email"></div>
+                    <div class="mb-2"><label class="form-label">Stage</label><input class="form-control" name="stage_id"></div>
+                    <div class="mb-2"><label class="form-label">Owner</label><input class="form-control" name="owner_id"></div>
+                    <div class="mb-2"><label class="form-label">Company</label><input class="form-control" name="establishment_id"></div>
+                    <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" name="notes"></textarea></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="card list-card">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end mb-2">
+            <div class="col-md-8">
+                <label class="form-label text-muted">Search leads</label>
+                <input type="text" class="form-control" name="q" value="{{ query }}" placeholder="Search by name, company, phone, email or notes">
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search me-2"></i>Search
+                </button>
+            </div>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Company</th>
+                        <th>Stage</th>
+                        <th>Status</th>
+                        <th>Value</th>
+                        <th>Owner</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in lead_list %}
+                    {% with lead=item.row details=item.details %}
+                    <tr>
+                        <td>
+                            <div class="fw-semibold">{% if details.name != '-' %}{{ details.name }}{% else %}Unnamed lead{% endif %}</div>
+                            <div class="small text-muted">{{ details.phone }}</div>
+                        </td>
+                        <td>{{ details.company }}</td>
+                        <td>{{ details.stage }}</td>
+                        <td>
+                            <span class="badge bg-success-subtle text-success">{{ details.status }}</span>
+                        </td>
+                        <td>{{ details.value }}</td>
+                        <td>{{ details.owner }}</td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#leadModal{{ lead.id }}">
+                                <i class="bi bi-eye me-1"></i>View
+                            </button>
+                        </td>
+                    </tr>
+
+                    <div class="modal fade" id="leadModal{{ lead.id }}" tabindex="-1" aria-labelledby="leadModalLabel{{ lead.id }}" aria-hidden="true">
+                        <div class="modal-dialog modal-xl modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header modal-header-crm">
+                                    <div class="d-flex align-items-start justify-content-between w-100 gap-2">
+                                        <div>
+                                            <h5 class="modal-title modal-title-crm" id="leadModalLabel{{ lead.id }}">{{ details.name }}</h5>
+                                            <div class="modal-role">{{ details.company }}</div>
+                                        </div>
+                                        <div class="d-flex flex-column align-items-end gap-2 text-end">
+                                            <span class="badge crm-badge bg-success-subtle text-success">{{ details.status }}</span>
+                                            <div class="modal-meta">{{ details.stage }}</div>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body modal-body-crm p-2 p-md-2">
+                                    <ul class="nav nav-tabs nav-tabs-crm" role="tablist">
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#leadInfo{{ lead.id }}" type="button" role="tab"><i class="bi bi-person-lines-fill me-1"></i>Lead Info</button>
+                                        </li>
+                                    </ul>
+
+                                    <div class="tab-content tab-content-crm p-2 p-md-2">
+                                        <div class="tab-pane fade show active" id="leadInfo{{ lead.id }}" role="tabpanel">
+                                            <div class="card border-0 crm-panel-card">
+                                                <div class="card-body p-2 p-md-2">
+                                                    <div class="row g-2 align-items-stretch">
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Name</div>
+                                                                <div class="crm-field-value">{{ details.name }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Company</div>
+                                                                <div class="crm-field-value">{{ details.company }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Stage</div>
+                                                                <div class="crm-field-value">{{ details.stage }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Status</div>
+                                                                <div class="crm-field-value">{{ details.status }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Phone</div>
+                                                                <div class="crm-field-value">{{ details.phone }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Email</div>
+                                                                <div class="crm-field-value">{{ details.email }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Value</div>
+                                                                <div class="crm-field-value">{{ details.value }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12 col-md-6">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Owner</div>
+                                                                <div class="crm-field-value">{{ details.owner }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <div class="crm-field">
+                                                                <div class="crm-field-label">Notes</div>
+                                                                <div class="crm-field-value">{{ details.notes }}</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endwith %}
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-2">No leads found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% include 'includes/compact_pagination.html' with aria_label='Leads pagination' %}
+    </div>
+</div>
+{% endblock %}

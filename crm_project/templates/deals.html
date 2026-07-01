@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+
+{% block title %}Deals | Northstar CRM{% endblock %}
+{% block page_title %}Deals{% endblock %}
+{% block page_breadcrumb %}Workspace / Deals{% endblock %}
+{% block page_subtitle %}Track momentum across your pipeline{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div>
+        <p class="text-muted mb-1">Pipeline</p>
+        <h2 class="page-title mb-0">Deals</h2>
+    </div>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dealFormModal">
+        <i class="bi bi-plus-lg me-2"></i>New Deal
+    </button>
+</div>
+
+<div class="modal fade" id="dealFormModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create deal</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2"><label class="form-label">Name</label><input class="form-control" name="name"></div>
+                    <div class="mb-2"><label class="form-label">Amount</label><input class="form-control" name="expected_value_minor" type="number"></div>
+                    <div class="mb-2"><label class="form-label">Currency</label><input class="form-control" name="currency_code"></div>
+                    <div class="mb-2"><label class="form-label">Stage</label><input class="form-control" name="stage_id"></div>
+                    <div class="mb-2"><label class="form-label">Probability</label><input class="form-control" name="probability_pct" type="number"></div>
+                    <div class="mb-2"><label class="form-label">Close date</label><input class="form-control" name="target_close_date"></div>
+                    <div class="mb-2"><label class="form-label">Notes</label><textarea class="form-control" name="notes"></textarea></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="card list-card">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end mb-2">
+            <div class="col-md-6">
+                <label class="form-label text-muted">Search deals</label>
+                <input type="text" class="form-control" name="q" value="{{ query }}" placeholder="Search by deal name, currency or notes">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label text-muted">Stage</label>
+                <select class="form-select" name="stage">
+                    {% for option in stage_filter_options %}
+                    <option value="{% if option != 'All Stages' %}{{ option }}{% endif %}" {% if stage_filter == option or not stage_filter and option == 'All Stages' %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search me-2"></i>Search
+                </button>
+            </div>
+        </form>
+
+        <div class="kanban-board-shell">
+        <div class="kanban-board" id="dealKanbanBoard">
+            {% for column in stage_columns %}
+            <section class="kanban-column" data-stage="{{ column.id }}">
+                <header>{{ column.name }}</header>
+                {% for item in column.items %}
+                {% with deal=item.row details=item.details %}
+                <article class="deal-card" draggable="true" data-kanban-card="true">
+                    <div class="deal-card-title" title="{{ details.name }}">{{ details.name }}</div>
+                    <div class="deal-card-line">
+                        <span class="deal-label">Customer</span>
+                        <span class="deal-value" title="{{ details.customer }}">{{ details.customer }}</span>
+                    </div>
+                    <div class="deal-card-line">
+                        <span class="deal-label">Value</span>
+                        <span class="deal-value" title="{{ details.amount }}">{{ details.amount }}</span>
+                    </div>
+                    <div class="deal-card-line">
+                        <span class="deal-label">Close Date</span>
+                        <span class="deal-value" title="{{ details.close_date }}">{{ details.close_date }}</span>
+                    </div>
+                    <div class="deal-card-line">
+                        <span class="deal-label">Probability</span>
+                        <span class="deal-value" title="{{ details.probability }}">{{ details.probability }}</span>
+                    </div>
+                    <div class="deal-card-line">
+                        <span class="deal-label">Assigned</span>
+                        <span class="deal-value" title="{{ details.assigned_user }}">{{ details.assigned_user }}</span>
+                    </div>
+                    <div class="deal-card-foot">
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#dealModal{{ deal.id }}">View</button>
+                    </div>
+                </article>
+
+                <div class="modal fade" id="dealModal{{ deal.id }}" tabindex="-1" aria-labelledby="dealModalLabel{{ deal.id }}" aria-hidden="true">
+                    <div class="modal-dialog modal-xl modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header modal-header-crm">
+                                <div class="d-flex align-items-start justify-content-between w-100 gap-2">
+                                    <div>
+                                        <h5 class="modal-title modal-title-crm" id="dealModalLabel{{ deal.id }}">{{ details.name }}</h5>
+                                        <div class="modal-role">{{ details.stage }}</div>
+                                    </div>
+                                    <div class="d-flex flex-column align-items-end gap-2 text-end">
+                                        <span class="badge crm-badge bg-primary-subtle text-primary">{{ details.amount }}</span>
+                                        <div class="modal-meta">{{ details.close_date }}</div>
+                                    </div>
+                                </div>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body modal-body-crm p-2 p-md-2">
+                                <div class="card border-0 crm-panel-card">
+                                    <div class="card-body p-2 p-md-2">
+                                        <div class="row g-2 align-items-stretch">
+                                            <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Deal Name</div><div class="crm-field-value">{{ details.name }}</div></div></div>
+                                            <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Customer</div><div class="crm-field-value">{{ details.customer }}</div></div></div>
+                                            <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Value</div><div class="crm-field-value">{{ details.amount }}</div></div></div>
+                                            <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Stage</div><div class="crm-field-value">{{ details.stage }}</div></div></div>
+                                            <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Target Close Date</div><div class="crm-field-value">{{ details.close_date }}</div></div></div>
+                                            <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Probability</div><div class="crm-field-value">{{ details.probability }}</div></div></div>
+                                            <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Assigned User</div><div class="crm-field-value">{{ details.assigned_user }}</div></div></div>
+                                            <div class="col-12"><div class="crm-field"><div class="crm-field-label">Notes</div><div class="crm-field-value">{{ details.notes }}</div></div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endwith %}
+                {% empty %}
+                <div class="empty-state">No deals in this stage.</div>
+                {% endfor %}
+            </section>
+            {% endfor %}
+        </div>
+        </div>
+
+        {% include 'includes/compact_pagination.html' with aria_label='Deals pagination' item_label='Deals' %}
+    </div>
+</div>
+{% endblock %}
