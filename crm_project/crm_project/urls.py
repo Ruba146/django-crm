@@ -14,8 +14,14 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.contrib import admin
 from django.urls import path, include
+from crm import views as crm_views
+from django.contrib.auth.decorators import login_required
+from crm.access import admin_users_guard
 
 urlpatterns = [
+    path("admin/users/", login_required(admin_users_guard(crm_views.users_admin))),
+    path("admin/", admin.site.urls),
     path("", include("crm.urls")),
 ]

@@ -11,27 +11,38 @@
         <p class="text-muted mb-1">Execution</p>
         <h2 class="page-title mb-0">Tasks</h2>
     </div>
+    {% if can.tasks_create %}
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#taskFormModal">
         <i class="bi bi-plus-lg me-2"></i>New Task
     </button>
+    {% endif %}
 </div>
 
+{% if messages %}
+{% for message in messages %}
+<div class="alert alert-{{ message.tags|default:'info' }} py-2 mb-2">{{ message }}</div>
+{% endfor %}
+{% endif %}
+
+{% if can.tasks_create %}
 <div class="modal fade" id="taskFormModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <form method="post">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="create">
-                <div class="modal-header">
-                    <h5 class="modal-title">Create task</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-2"><label class="form-label">Title</label><input class="form-control" name="title"></div>
-                    <div class="mb-2"><label class="form-label">Description</label><textarea class="form-control" name="description"></textarea></div>
-                    <div class="mb-2"><label class="form-label">Due date</label><input class="form-control" name="due_at"></div>
-                    <div class="mb-2"><label class="form-label">Outcome</label><input class="form-control" name="outcome"></div>
-                    <div class="mb-2"><label class="form-label">Assignee</label><input class="form-control" name="assignee_id"></div>
+                            <form method="post" id="taskCreateForm">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="create">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">Create task</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="row g-2">
+                                        <div class="col-md-6"><label class="form-label">Title</label><input class="form-control" name="title" required></div>
+                                        <div class="col-md-3"><label class="form-label">Due Date</label><input class="form-control" type="date" name="due_at" id="taskCreateDueDate"><input type="hidden" name="due_date" id="taskCreateDueDateHidden"></div>
+                                        <div class="col-md-3"><label class="form-label">Due Time</label><input class="form-control" type="time" name="due_time" id="taskCreateDueTime"></div>
+                        <div class="col-md-6"><label class="form-label">Related Deal</label><input class="form-control" name="entity_id" placeholder="Optional deal id"></div>
+                        <div class="col-12"><label class="form-label">Related Contact</label><input class="form-control" name="entity_type" value="contact" placeholder="Optional contact id"></div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -41,55 +52,86 @@
         </div>
     </div>
 </div>
+{% endif %}
 
-<div class="card list-card">
-    <div class="card-body">
-        <form method="get" class="row g-2 align-items-end mb-2">
-            <div class="col-md-8">
-                <label class="form-label text-muted">Search tasks</label>
-                <input type="text" class="form-control" name="q" value="{{ query }}" placeholder="Search by title, description or outcome">
-            </div>
-            <div class="col-md-4">
-                <button type="submit" class="btn btn-primary w-100">
-                    <i class="bi bi-search me-2"></i>Search
-                </button>
-            </div>
-        </form>
+<div class="row g-3">
+    <div class="col-lg-5">
+        <div class="card list-card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <div class="section-title">Task List</div>
+                        <div class="section-subtitle">Focused view of visible work</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        {% if is_admin %}
+                        <select class="form-select form-select-sm" name="assignee" form="taskFiltersForm">
+                            <option value="">All users</option>
+                            {% for user in assignable_users %}
+                            <option value="{{ user.id }}" {% if assignee_filter == user.id|stringformat:'s' %}selected{% endif %}>{{ user.get_full_name|default:user.username }}</option>
+                            {% endfor %}
+                        </select>
+                        {% endif %}
+                    </div>
+                </div>
 
-        <div class="table-responsive">
-            <table class="table align-middle">
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Description</th>
-                        <th>Due Date</th>
-                        <th>Priority</th>
-                        <th>Status</th>
-                        <th>Assigned User</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
+                <form id="taskFiltersForm" method="get" class="row g-2 align-items-end mb-2">
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Search</label>
+                        <input type="text" class="form-control form-control-sm" name="q" value="{{ query }}" placeholder="Title, description">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted">Status</label>
+                        <select class="form-select form-select-sm" name="status">
+                            <option value="">All</option>
+                            <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+                            <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted">Priority</label>
+                        <select class="form-select form-select-sm" name="priority">
+                            <option value="">All</option>
+                            <option value="High" {% if priority_filter == 'High' %}selected{% endif %}>High</option>
+                            <option value="Medium" {% if priority_filter == 'Medium' %}selected{% endif %}>Medium</option>
+                            <option value="Low" {% if priority_filter == 'Low' %}selected{% endif %}>Low</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-sm btn-primary w-100">Filter</button>
+                    </div>
+                </form>
+
+                <div class="mb-3" data-task-bucket="today">
+                    <div class="fw-semibold text-muted mb-2">Today</div>
                     {% for item in task_list %}
+                    {% if item.details.bucket == "today" %}
                     {% with task=item.row details=item.details %}
-                    <tr>
-                        <td>
-                            <div class="fw-semibold">{{ details.title }}</div>
-                        </td>
-                        <td>{{ details.description }}</td>
-                        <td>{{ details.due_date }}</td>
-                        <td>{{ details.priority }}</td>
-                        <td>
-                            <span class="badge bg-success-subtle text-success">{{ details.status }}</span>
-                        </td>
-                        <td>{{ details.assigned_user }}</td>
-                        <td>
-                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#taskModal{{ task.id }}">
-                                <i class="bi bi-eye me-1"></i>View
-                            </button>
-                        </td>
-                    </tr>
-
+                    <div data-task-row-id="{{ task.id }}">
+                        <div
+                            class="task-list-row"
+                            role="button"
+                            tabindex="0"
+                            data-bs-toggle="modal"
+                            data-bs-target="#taskModal{{ task.id }}"
+                            data-task-edit-id="{{ task.id }}"
+                            data-task-id="{{ task.id }}"
+                            data-task-title="{{ task.title|default:'' }}"
+                            data-task-description="{{ task.description|default:'' }}"
+                            data-task-due-at="{{ task.due_at|default:'' }}"
+                            data-task-priority="{{ details.priority }}"
+                            data-task-assignee="{{ task.assignee_id|default:'' }}"
+                            data-task-status="{{ details.status }}"
+                        >
+                            <button type="button" class="task-checkbox {% if details.is_completed %}is-checked{% endif %}" data-task-toggle="{{ task.id }}" data-next-status="{% if details.is_completed %}Pending{% else %}Completed{% endif %}" aria-label="{% if details.is_completed %}Mark pending{% else %}Mark completed{% endif %}"></button>
+                            <div class="task-row-main">
+                                <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                                    <strong class="mb-0" data-task-title-id="{{ task.id }}">{{ details.title }}</strong>
+                                    <span class="task-status-pill {% if details.is_completed %}status-completed{% else %}status-pending{% endif %}" data-task-status-id="{{ task.id }}">{{ details.status }}</span>
+                                </div>
+                                <div class="task-row-meta" data-task-meta-id="{{ task.id }}">Due {{ details.due_date }}{% if details.due_time|default:'' %} {{ details.due_time }}{% endif %} • {{ details.priority }}</div>
+                            </div>
+                        </div>
                     <div class="modal fade" id="taskModal{{ task.id }}" tabindex="-1" aria-labelledby="taskModalLabel{{ task.id }}" aria-hidden="true">
                         <div class="modal-dialog modal-xl modal-dialog-centered">
                             <div class="modal-content">
@@ -97,83 +139,444 @@
                                     <div class="d-flex align-items-start justify-content-between w-100 gap-2">
                                         <div>
                                             <h5 class="modal-title modal-title-crm" id="taskModalLabel{{ task.id }}">{{ details.title }}</h5>
-                                            <div class="modal-role">{{ details.due_date }}</div>
+                                            <div class="modal-role">Due {{ details.due_date }}{% if details.due_time|default:'' %} {{ details.due_time }}{% endif %}</div>
                                         </div>
                                         <div class="d-flex flex-column align-items-end gap-2 text-end">
-                                            <span class="badge crm-badge bg-primary-subtle text-primary">{{ details.status }}</span>
+                                            <span class="badge crm-badge task-status-pill {% if details.is_completed %}status-completed{% else %}status-pending{% endif %}" data-task-status-id="{{ task.id }}">{{ details.status }}</span>
                                             <div class="modal-meta">{{ details.priority }}</div>
                                         </div>
                                     </div>
                                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                                 </div>
                                 <div class="modal-body modal-body-crm p-2 p-md-2">
-                                    <ul class="nav nav-tabs nav-tabs-crm" role="tablist">
-                                        <li class="nav-item" role="presentation">
-                                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#taskInfo{{ task.id }}" type="button" role="tab"><i class="bi bi-list-check me-1"></i>Task Details</button>
-                                        </li>
-                                    </ul>
-
-                                    <div class="tab-content tab-content-crm p-2 p-md-2">
-                                        <div class="tab-pane fade show active" id="taskInfo{{ task.id }}" role="tabpanel">
-                                            <div class="card border-0 crm-panel-card">
-                                                <div class="card-body p-2 p-md-2">
-                                                    <div class="row g-2 align-items-stretch">
-                                                        <div class="col-12 col-md-6">
-                                                            <div class="crm-field">
-                                                                <div class="crm-field-label">Title</div>
-                                                                <div class="crm-field-value">{{ details.title }}</div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-12 col-md-6">
-                                                            <div class="crm-field">
-                                                                <div class="crm-field-label">Description</div>
-                                                                <div class="crm-field-value">{{ details.description }}</div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-12 col-md-6">
-                                                            <div class="crm-field">
-                                                                <div class="crm-field-label">Due Date</div>
-                                                                <div class="crm-field-value">{{ details.due_date }}</div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-12 col-md-6">
-                                                            <div class="crm-field">
-                                                                <div class="crm-field-label">Priority</div>
-                                                                <div class="crm-field-value">{{ details.priority }}</div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-12 col-md-6">
-                                                            <div class="crm-field">
-                                                                <div class="crm-field-label">Status</div>
-                                                                <div class="crm-field-value">{{ details.status }}</div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-12 col-md-6">
-                                                            <div class="crm-field">
-                                                                <div class="crm-field-label">Assigned User</div>
-                                                                <div class="crm-field-value">{{ details.assigned_user }}</div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
+                                    <div class="row g-2">
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Title</div><div class="crm-field-value">{{ details.title }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Description</div><div class="crm-field-value">{{ details.description }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Assigned To</div><div class="crm-field-value">{{ details.assigned_user }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Created By</div><div class="crm-field-value">{{ details.created_by }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Due Date</div><div class="crm-field-value">{{ details.due_date }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Priority</div><div class="crm-field-value">{{ details.priority }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Status</div><div class="crm-field-value">{{ details.status }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Related Deal</div><div class="crm-field-value">-</div></div></div>
+                                        <div class="col-12"><div class="crm-field"><div class="crm-field-label">Notes</div><div class="crm-field-value">-</div></div></div>
+                                        <div class="col-12"><div class="crm-field"><div class="crm-field-label">Activities</div><div class="crm-field-value">-</div></div></div>
                                     </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                                    {% if can.tasks_edit %}<button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#taskEditModal" data-task-edit-id="{{ task.id }}" data-task-id="{{ task.id }}" data-task-title="{{ task.title|default:'' }}" data-task-description="{{ task.description|default:'' }}" data-task-due-at="{{ task.due_at|default:'' }}" data-task-priority="{{ details.priority }}" data-task-assignee="{{ task.assignee_id|default:'' }}" data-task-status="{{ details.status }}">Edit</button>{% endif %}
+                                    {% if can.tasks_edit %}<button type="button" class="btn btn-outline-success" data-task-toggle="{{ task.id }}" data-next-status="{% if details.is_completed %}Pending{% else %}Completed{% endif %}">{% if details.is_completed %}Mark Pending{% else %}Complete{% endif %}</button>{% endif %}
+                                    {% if can.tasks_delete and is_admin %}<button type="button" class="btn btn-outline-danger">Delete</button>{% endif %}
                                 </div>
                             </div>
                         </div>
                     </div>
+                    </div>
                     {% endwith %}
-                    {% empty %}
-                    <tr>
-                        <td colspan="7" class="text-center text-muted py-2">No tasks found.</td>
-                    </tr>
+                    {% endif %}
                     {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                    {% if not task_list|dictsort:"details.bucket" %}
+                    <div class="text-muted small">No tasks in this section.</div>
+                    {% endif %}
+                </div>
 
-        {% include 'includes/compact_pagination.html' with aria_label='Tasks pagination' %}
+                <div class="mb-3" data-task-bucket="upcoming">
+                    <div class="fw-semibold text-muted mb-2">Upcoming</div>
+                    {% for item in task_list %}
+                    {% if item.details.bucket == "upcoming" %}
+                    {% with task=item.row details=item.details %}
+                    <div data-task-row-id="{{ task.id }}">
+                        <div
+                            class="task-list-row"
+                            role="button"
+                            tabindex="0"
+                            data-bs-toggle="modal"
+                            data-bs-target="#taskModal{{ task.id }}"
+                            data-task-edit-id="{{ task.id }}"
+                            data-task-id="{{ task.id }}"
+                            data-task-title="{{ task.title|default:'' }}"
+                            data-task-description="{{ task.description|default:'' }}"
+                            data-task-due-at="{{ task.due_at|default:'' }}"
+                            data-task-priority="{{ details.priority }}"
+                            data-task-assignee="{{ task.assignee_id|default:'' }}"
+                            data-task-status="{{ details.status }}"
+                        >
+                            <button type="button" class="task-checkbox {% if details.is_completed %}is-checked{% endif %}" data-task-toggle="{{ task.id }}" data-next-status="{% if details.is_completed %}Pending{% else %}Completed{% endif %}" aria-label="{% if details.is_completed %}Mark pending{% else %}Mark completed{% endif %}"></button>
+                            <div class="task-row-main">
+                                <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                                    <strong class="mb-0" data-task-title-id="{{ task.id }}">{{ details.title }}</strong>
+                                    <span class="task-status-pill {% if details.is_completed %}status-completed{% else %}status-pending{% endif %}" data-task-status-id="{{ task.id }}">{{ details.status }}</span>
+                                </div>
+                                <div class="task-row-meta" data-task-meta-id="{{ task.id }}">Due {{ details.due_date }}{% if details.due_time|default:'' %} {{ details.due_time }}{% endif %} • {{ details.priority }}</div>
+                            </div>
+                        </div>
+                    <div class="modal fade" id="taskModal{{ task.id }}" tabindex="-1" aria-labelledby="taskModalLabel{{ task.id }}" aria-hidden="true">
+                        <div class="modal-dialog modal-xl modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header modal-header-crm">
+                                    <div class="d-flex align-items-start justify-content-between w-100 gap-2">
+                                        <div>
+                                            <h5 class="modal-title modal-title-crm" id="taskModalLabel{{ task.id }}">{{ details.title }}</h5>
+                                            <div class="modal-role">Due {{ details.due_date }}{% if details.due_time|default:'' %} {{ details.due_time }}{% endif %}</div>
+                                        </div>
+                                        <div class="d-flex flex-column align-items-end gap-2 text-end">
+                                            <span class="badge crm-badge task-status-pill {% if details.is_completed %}status-completed{% else %}status-pending{% endif %}" data-task-status-id="{{ task.id }}">{{ details.status }}</span>
+                                            <div class="modal-meta">{{ details.priority }}</div>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body modal-body-crm p-2 p-md-2">
+                                    <div class="row g-2">
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Title</div><div class="crm-field-value">{{ details.title }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Description</div><div class="crm-field-value">{{ details.description }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Assigned To</div><div class="crm-field-value">{{ details.assigned_user }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Created By</div><div class="crm-field-value">{{ details.created_by }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Due Date</div><div class="crm-field-value">{{ details.due_date }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Priority</div><div class="crm-field-value">{{ details.priority }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Status</div><div class="crm-field-value">{{ details.status }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Related Deal</div><div class="crm-field-value">-</div></div></div>
+                                        <div class="col-12"><div class="crm-field"><div class="crm-field-label">Notes</div><div class="crm-field-value">-</div></div></div>
+                                        <div class="col-12"><div class="crm-field"><div class="crm-field-label">Activities</div><div class="crm-field-value">-</div></div></div>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                                    {% if can.tasks_edit %}<button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#taskEditModal" data-task-edit-id="{{ task.id }}" data-task-id="{{ task.id }}" data-task-title="{{ task.title|default:'' }}" data-task-description="{{ task.description|default:'' }}" data-task-due-at="{{ task.due_at|default:'' }}" data-task-priority="{{ details.priority }}" data-task-assignee="{{ task.assignee_id|default:'' }}" data-task-status="{{ details.status }}">Edit</button>{% endif %}
+                                    {% if can.tasks_edit %}<button type="button" class="btn btn-outline-success" data-task-toggle="{{ task.id }}" data-next-status="{% if details.is_completed %}Pending{% else %}Completed{% endif %}">{% if details.is_completed %}Mark Pending{% else %}Complete{% endif %}</button>{% endif %}
+                                    {% if can.tasks_delete and is_admin %}<button type="button" class="btn btn-outline-danger">Delete</button>{% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                    {% endwith %}
+                    {% endif %}
+                    {% endfor %}
+                    {% if not task_list|dictsort:"details.bucket" %}
+                    <div class="text-muted small">No tasks in this section.</div>
+                    {% endif %}
+                </div>
+
+                <div class="mb-3" data-task-bucket="overdue">
+                    <div class="fw-semibold text-muted mb-2">Overdue</div>
+                    {% for item in task_list %}
+                    {% if item.details.bucket == "overdue" %}
+                    {% with task=item.row details=item.details %}
+                    <div data-task-row-id="{{ task.id }}">
+                        <div
+                            class="task-list-row"
+                            role="button"
+                            tabindex="0"
+                            data-bs-toggle="modal"
+                            data-bs-target="#taskModal{{ task.id }}"
+                            data-task-edit-id="{{ task.id }}"
+                            data-task-id="{{ task.id }}"
+                            data-task-title="{{ task.title|default:'' }}"
+                            data-task-description="{{ task.description|default:'' }}"
+                            data-task-due-at="{{ task.due_at|default:'' }}"
+                            data-task-priority="{{ details.priority }}"
+                            data-task-assignee="{{ task.assignee_id|default:'' }}"
+                            data-task-status="{{ details.status }}"
+                        >
+                            <button type="button" class="task-checkbox {% if details.is_completed %}is-checked{% endif %}" data-task-toggle="{{ task.id }}" data-next-status="{% if details.is_completed %}Pending{% else %}Completed{% endif %}" aria-label="{% if details.is_completed %}Mark pending{% else %}Mark completed{% endif %}"></button>
+                            <div class="task-row-main">
+                                <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                                    <strong class="mb-0" data-task-title-id="{{ task.id }}">{{ details.title }}</strong>
+                                    <span class="task-status-pill {% if details.is_completed %}status-completed{% else %}status-pending{% endif %}" data-task-status-id="{{ task.id }}">{{ details.status }}</span>
+                                </div>
+                                <div class="task-row-meta" data-task-meta-id="{{ task.id }}">Due {{ details.due_date }}{% if details.due_time|default:'' %} {{ details.due_time }}{% endif %} • {{ details.priority }}</div>
+                            </div>
+                        </div>
+                    <div class="modal fade" id="taskModal{{ task.id }}" tabindex="-1" aria-labelledby="taskModalLabel{{ task.id }}" aria-hidden="true">
+                        <div class="modal-dialog modal-xl modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header modal-header-crm">
+                                    <div class="d-flex align-items-start justify-content-between w-100 gap-2">
+                                        <div>
+                                            <h5 class="modal-title modal-title-crm" id="taskModalLabel{{ task.id }}">{{ details.title }}</h5>
+                                            <div class="modal-role">Due {{ details.due_date }}{% if details.due_time|default:'' %} {{ details.due_time }}{% endif %}</div>
+                                        </div>
+                                        <div class="d-flex flex-column align-items-end gap-2 text-end">
+                                            <span class="badge crm-badge task-status-pill {% if details.is_completed %}status-completed{% else %}status-pending{% endif %}" data-task-status-id="{{ task.id }}">{{ details.status }}</span>
+                                            <div class="modal-meta">{{ details.priority }}</div>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body modal-body-crm p-2 p-md-2">
+                                    <div class="row g-2">
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Title</div><div class="crm-field-value">{{ details.title }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Description</div><div class="crm-field-value">{{ details.description }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Assigned To</div><div class="crm-field-value">{{ details.assigned_user }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Created By</div><div class="crm-field-value">{{ details.created_by }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Due Date</div><div class="crm-field-value">{{ details.due_date }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Priority</div><div class="crm-field-value">{{ details.priority }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Status</div><div class="crm-field-value">{{ details.status }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Related Deal</div><div class="crm-field-value">-</div></div></div>
+                                        <div class="col-12"><div class="crm-field"><div class="crm-field-label">Notes</div><div class="crm-field-value">-</div></div></div>
+                                        <div class="col-12"><div class="crm-field"><div class="crm-field-label">Activities</div><div class="crm-field-value">-</div></div></div>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                                    {% if can.tasks_edit %}<button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#taskEditModal" data-task-edit-id="{{ task.id }}" data-task-id="{{ task.id }}" data-task-title="{{ task.title|default:'' }}" data-task-description="{{ task.description|default:'' }}" data-task-due-at="{{ task.due_at|default:'' }}" data-task-priority="{{ details.priority }}" data-task-assignee="{{ task.assignee_id|default:'' }}" data-task-status="{{ details.status }}">Edit</button>{% endif %}
+                                    {% if can.tasks_edit %}<button type="button" class="btn btn-outline-success" data-task-toggle="{{ task.id }}" data-next-status="{% if details.is_completed %}Pending{% else %}Completed{% endif %}">{% if details.is_completed %}Mark Pending{% else %}Complete{% endif %}</button>{% endif %}
+                                    {% if can.tasks_delete and is_admin %}<button type="button" class="btn btn-outline-danger">Delete</button>{% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                    {% endwith %}
+                    {% endif %}
+                    {% endfor %}
+                    {% if not task_list|dictsort:"details.bucket" %}
+                    <div class="text-muted small">No tasks in this section.</div>
+                    {% endif %}
+                </div>
+
+                <div class="mb-3" data-task-bucket="completed">
+                    <div class="fw-semibold text-muted mb-2">Completed</div>
+                    {% for item in task_list %}
+                    {% if item.details.bucket == "completed" %}
+                    {% with task=item.row details=item.details %}
+                    <div data-task-row-id="{{ task.id }}">
+                        <div
+                            class="task-list-row"
+                            role="button"
+                            tabindex="0"
+                            data-bs-toggle="modal"
+                            data-bs-target="#taskModal{{ task.id }}"
+                            data-task-edit-id="{{ task.id }}"
+                            data-task-id="{{ task.id }}"
+                            data-task-title="{{ task.title|default:'' }}"
+                            data-task-description="{{ task.description|default:'' }}"
+                            data-task-due-at="{{ task.due_at|default:'' }}"
+                            data-task-priority="{{ details.priority }}"
+                            data-task-assignee="{{ task.assignee_id|default:'' }}"
+                            data-task-status="{{ details.status }}"
+                        >
+                            <button type="button" class="task-checkbox {% if details.is_completed %}is-checked{% endif %}" data-task-toggle="{{ task.id }}" data-next-status="{% if details.is_completed %}Pending{% else %}Completed{% endif %}" aria-label="{% if details.is_completed %}Mark pending{% else %}Mark completed{% endif %}"></button>
+                            <div class="task-row-main">
+                                <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                                    <strong class="mb-0" data-task-title-id="{{ task.id }}">{{ details.title }}</strong>
+                                    <span class="task-status-pill {% if details.is_completed %}status-completed{% else %}status-pending{% endif %}" data-task-status-id="{{ task.id }}">{{ details.status }}</span>
+                                </div>
+                                <div class="task-row-meta" data-task-meta-id="{{ task.id }}">Due {{ details.due_date }}{% if details.due_time|default:'' %} {{ details.due_time }}{% endif %} • {{ details.priority }}</div>
+                            </div>
+                        </div>
+                    <div class="modal fade" id="taskModal{{ task.id }}" tabindex="-1" aria-labelledby="taskModalLabel{{ task.id }}" aria-hidden="true">
+                        <div class="modal-dialog modal-xl modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header modal-header-crm">
+                                    <div class="d-flex align-items-start justify-content-between w-100 gap-2">
+                                        <div>
+                                            <h5 class="modal-title modal-title-crm" id="taskModalLabel{{ task.id }}">{{ details.title }}</h5>
+                                            <div class="modal-role">Due {{ details.due_date }}{% if details.due_time|default:'' %} {{ details.due_time }}{% endif %}</div>
+                                        </div>
+                                        <div class="d-flex flex-column align-items-end gap-2 text-end">
+                                            <span class="badge crm-badge task-status-pill {% if details.is_completed %}status-completed{% else %}status-pending{% endif %}" data-task-status-id="{{ task.id }}">{{ details.status }}</span>
+                                            <div class="modal-meta">{{ details.priority }}</div>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body modal-body-crm p-2 p-md-2">
+                                    <div class="row g-2">
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Title</div><div class="crm-field-value">{{ details.title }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Description</div><div class="crm-field-value">{{ details.description }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Assigned To</div><div class="crm-field-value">{{ details.assigned_user }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Created By</div><div class="crm-field-value">{{ details.created_by }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Due Date</div><div class="crm-field-value">{{ details.due_date }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Priority</div><div class="crm-field-value">{{ details.priority }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Status</div><div class="crm-field-value">{{ details.status }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Related Deal</div><div class="crm-field-value">-</div></div></div>
+                                        <div class="col-12"><div class="crm-field"><div class="crm-field-label">Notes</div><div class="crm-field-value">-</div></div></div>
+                                        <div class="col-12"><div class="crm-field"><div class="crm-field-label">Activities</div><div class="crm-field-value">-</div></div></div>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                                    {% if can.tasks_edit %}<button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#taskEditModal" data-task-edit-id="{{ task.id }}" data-task-id="{{ task.id }}" data-task-title="{{ task.title|default:'' }}" data-task-description="{{ task.description|default:'' }}" data-task-due-at="{{ task.due_at|default:'' }}" data-task-priority="{{ details.priority }}" data-task-assignee="{{ task.assignee_id|default:'' }}" data-task-status="{{ details.status }}">Edit</button>{% endif %}
+                                    {% if can.tasks_edit %}<button type="button" class="btn btn-outline-success" data-task-toggle="{{ task.id }}" data-next-status="{% if details.is_completed %}Pending{% else %}Completed{% endif %}">{% if details.is_completed %}Mark Pending{% else %}Complete{% endif %}</button>{% endif %}
+                                    {% if can.tasks_delete and is_admin %}<button type="button" class="btn btn-outline-danger">Delete</button>{% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                    {% endwith %}
+                    {% endif %}
+                    {% endfor %}
+                    {% if not task_list|dictsort:"details.bucket" %}
+                    <div class="text-muted small">No tasks in this section.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card list-card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="section-title mb-0">Monthly Calendar</div>
+                    <div class="d-flex align-items-center gap-1">
+                        <a href="?{{ calendar_prev_year_query }}" class="btn btn-sm btn-outline-secondary" title="Previous year">«</a>
+                        <a href="?{{ calendar_prev_month_query }}" class="btn btn-sm btn-outline-secondary" title="Previous month">‹</a>
+                        <span class="fw-semibold mx-2" style="min-width: 140px; text-align: center;">{{ calendar_month_name }} {{ calendar_year }}</span>
+                        <a href="?{{ calendar_next_month_query }}" class="btn btn-sm btn-outline-secondary" title="Next month">›</a>
+                        <a href="?{{ calendar_next_year_query }}" class="btn btn-sm btn-outline-secondary" title="Next year">»</a>
+                        <a href="?{{ calendar_today_query }}" class="btn btn-sm btn-outline-primary ms-2">Today</a>
+                    </div>
+                </div>
+                <div class="table-responsive overflow-visible">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th class="text-center small text-muted">Mon</th>
+                                <th class="text-center small text-muted">Tue</th>
+                                <th class="text-center small text-muted">Wed</th>
+                                <th class="text-center small text-muted">Thu</th>
+                                <th class="text-center small text-muted">Fri</th>
+                                <th class="text-center small text-muted">Sat</th>
+                                <th class="text-center small text-muted">Sun</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for week in calendar_payload %}
+                            <tr>
+                                {% for day in week %}
+                                <td class="text-center align-top" style="height: 90px;">
+                                    {% if day.day %}
+                                    <button type="button" class="btn btn-link p-0 w-100 text-start" data-bs-toggle="modal" data-bs-target="#calendarDayModal" data-calendar-date="{{ day.date_key }}">
+                                        <div class="fw-semibold {% if day.is_today %}border border-primary rounded-pill px-2{% endif %}">{{ day.day }}</div>
+                                        {% if day.tasks %}
+                                        <div class="mt-1"><span class="badge rounded-pill bg-primary" style="font-size: 0.65rem;">{{ day.tasks|length }}</span></div>
+                                        {% endif %}
+                                    </button>
+                                    {% endif %}
+                                </td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
+
+{% if can.tasks_edit %}
+<div class="modal fade" id="taskEditModal" tabindex="-1" aria-labelledby="taskEditModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <form id="taskEditForm">
+                <div class="modal-header modal-header-crm">
+                    <div>
+                        <h5 class="modal-title modal-title-crm" id="taskEditModalTitle">Edit task</h5>
+                        <div class="modal-role">Update task details without leaving this page</div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="id">
+                    <div class="row g-3">
+                        <div class="col-md-8"><label class="form-label">Title</label><input class="form-control" name="title" required></div>
+                        <div class="col-md-4"><label class="form-label">Priority</label><select class="form-select" name="priority"><option>High</option><option>Medium</option><option>Low</option></select></div>
+                        <div class="col-md-6"><label class="form-label">Date</label><input class="form-control" type="date" name="due_date"></div>
+                        <div class="col-md-6"><label class="form-label">Time</label><input class="form-control" type="time" name="due_time"></div>
+                        <div class="col-md-6"><label class="form-label">Assigned user</label><select class="form-select" name="assignee_id">{% for user in assignable_users %}<option value="{{ user.id }}">{{ user.get_full_name|default:user.username }}</option>{% endfor %}</select></div>
+                        <div class="col-md-6"><label class="form-label">Status</label><select class="form-select" name="status"><option>Pending</option><option>Completed</option></select></div>
+                        <div class="col-12"><label class="form-label">Description</label><textarea class="form-control" name="description" rows="4"></textarea></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="modal fade" id="calendarDayModal" tabindex="-1" aria-labelledby="calendarDayModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="calendarDayModalTitle">Tasks</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {% for week in calendar_payload %}
+                {% for day in week %}
+                {% if day.day %}
+                <div data-calendar-day-panel="{{ day.date_key }}" hidden>
+                                                    {% if day.tasks %}
+                                                    <div class="mb-3">
+                                                        {% for task_item in day.tasks %}
+                                                        {% with task=task_item.row details=task_item.details %}
+                                                        <button type="button" class="btn btn-outline-secondary w-100 text-start mb-2" data-open-task-modal="#taskModal{{ task.id }}">
+                                                            <div class="fw-semibold">{{ details.title }}</div>
+                                                            <div class="small text-muted">{{ details.priority }} • {{ details.status }}</div>
+                                                        </button>
+                                                        {% endwith %}
+                                                        {% endfor %}
+                                                    </div>
+                                                    {% else %}
+                                                    <div class="text-muted mb-3">No tasks for this day.</div>
+                                                    {% endif %}
+                                                    {% if can.tasks_create %}
+                                                    <hr>
+                                                    <form method="post">
+                                                        {% csrf_token %}
+                                                        <input type="hidden" name="action" value="create">
+                                                        <div class="row g-2">
+                                                            <div class="col-md-6"><label class="form-label">Title</label><input class="form-control form-control-sm" name="title" required></div>
+                                                            <div class="col-md-3"><label class="form-label">Due Date</label><input class="form-control form-control-sm" type="date" name="due_at" value="{{ day.date_key }}"><input type="hidden" name="due_date" value="{{ day.date_key }}"></div>
+                                                            <div class="col-md-3"><label class="form-label">Due Time</label><input class="form-control form-control-sm" type="time" name="due_time"></div>
+                                                            <div class="col-md-6"><label class="form-label">Priority</label><select class="form-select form-select-sm" name="priority"><option value="High">High</option><option value="Medium" selected>Medium</option><option value="Low">Low</option></select></div>
+                                                            <div class="col-md-6"><label class="form-label">Status</label><select class="form-select form-select-sm" name="status"><option value="Pending" selected>Pending</option><option value="Completed">Completed</option></select></div>
+                                                            <div class="col-12"><label class="form-label">Description</label><textarea class="form-control form-control-sm" name="description"></textarea></div>
+                                                            <div class="col-md-6"><label class="form-label">Assign To</label><select class="form-select form-select-sm" name="assignee_id">{% for user in assignable_users %}<option value="{{ user.id }}">{{ user.get_full_name|default:user.username }}</option>{% endfor %}</select></div>
+                                                            <div class="col-md-6"><label class="form-label">Related Deal</label><input class="form-control form-control-sm" name="entity_id" placeholder="Optional deal id"></div>
+                                                        </div>
+                                                        <div class="mt-3 d-flex justify-content-end gap-2">
+                                                            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                                                            <button type="submit" class="btn btn-primary btn-sm">Save Task</button>
+                                                        </div>
+                                                    </form>
+                                                    {% endif %}
+                </div>
+                {% endif %}
+                {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+{% include 'includes/compact_pagination.html' with aria_label='Tasks pagination' %}
 {% endblock %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+    document.querySelectorAll('form').forEach(function(form){
+        if(form.querySelector('[name="due_at"]')){
+            // keep a hidden `due_date` field in sync with visible `due_at` to match backend
+            var visible = form.querySelector('[name="due_at"]');
+            var hidden = form.querySelector('[name="due_date"]');
+            if(!hidden){
+                hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'due_date'; form.appendChild(hidden);
+            }
+            // set initial value
+            hidden.value = visible.value || hidden.value || '';
+            visible.addEventListener('input', function(){ hidden.value = visible.value || ''; });
+        }
+    });
+});
+</script>

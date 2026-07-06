@@ -11,11 +11,14 @@
         <p class="text-muted mb-1">Pipeline</p>
         <h2 class="page-title mb-0">Leads</h2>
     </div>
+    {% if can.leads_create %}
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#leadFormModal">
         <i class="bi bi-plus-lg me-2"></i>New Lead
     </button>
+    {% endif %}
 </div>
 
+{% if can.leads_create %}
 <div class="modal fade" id="leadFormModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -43,6 +46,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <div class="card list-card">
     <div class="card-body">
@@ -83,6 +87,7 @@
                         <td>{{ details.stage }}</td>
                         <td>
                             <span class="badge bg-success-subtle text-success">{{ details.status }}</span>
+                            <span class="badge bg-info-subtle ms-2 ai-score-badge" data-ai-score="{{ details.ai_score|cut:'%' }}">AI Score {{ details.ai_score }}</span>
                         </td>
                         <td>{{ details.value }}</td>
                         <td>{{ details.owner }}</td>
@@ -173,6 +178,41 @@
                                                             <div class="crm-field">
                                                                 <div class="crm-field-label">Notes</div>
                                                                 <div class="crm-field-value">{{ details.notes }}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <div class="card border-0 crm-panel-card mt-2">
+                                                                <div class="card-body p-2 p-md-2">
+                                                                    <div class="fw-semibold mb-2">AI Analysis</div>
+                                                                    <div class="row g-2">
+                                                                        <div class="col-12 col-md-4">
+                                                                            <div class="crm-field">
+                                                                                <div class="crm-field-label">AI Score</div>
+                                                                                <div class="crm-field-value"><span class="ai-score-badge" data-ai-score="{{ details.ai_score|cut:'%' }}">{{ details.ai_score }}</span></div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="col-12 col-md-4">
+                                                                            <div class="crm-field">
+                                                                                <div class="crm-field-label">Confidence</div>
+                                                                                <div class="crm-field-value">{{ details.ai_confidence }}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="col-12">
+                                                                            <div class="crm-field">
+                                                                                <div class="crm-field-label">Reasons</div>
+                                                                                <div class="crm-field-value">
+                                                                                    <ul class="mb-0 ps-3">
+                                                                                        {% for reason in details.ai_reasons %}
+                                                                                        <li>{{ reason }}</li>
+                                                                                        {% empty %}
+                                                                                        <li>No analysis reasons available.</li>
+                                                                                        {% endfor %}
+                                                                                    </ul>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>

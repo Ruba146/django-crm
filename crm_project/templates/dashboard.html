@@ -6,179 +6,245 @@
 {% block page_subtitle %}A calm view of your revenue momentum{% endblock %}
 
 {% block content %}
-<div class="dashboard-fit">
-    <section class="dash-card hero-compact">
-        <div>
-            <div class="page-kicker mb-1">Welcome back</div>
-            <h1 class="hero-compact-title">Revenue cockpit for your team.</h1>
-            <div class="hero-footnote">Today • {% now "l, d M Y" %}</div>
-        </div>
-        <div class="hero-actions compact-actions">
-            <a class="btn btn-primary btn-sm" href="{% url 'deals' %}"><i class="bi bi-plus-lg me-1"></i>New Deal</a>
-            <a class="btn btn-secondary btn-sm" href="{% url 'activities' %}"><i class="bi bi-activity me-1"></i>Log Activity</a>
-            <a class="btn btn-secondary btn-sm" href="{% url 'contacts' %}"><i class="bi bi-person-plus me-1"></i>Add Contact</a>
-        </div>
-    </section>
-
-    <section class="dash-card kpi-compact-grid">
-        <article class="kpi-mini">
-            <div class="mini-ring ring-1"><i class="bi bi-people"></i></div>
-            <div class="mini-value">{{ contacts_count }}</div>
-            <div class="mini-label">Contacts</div>
-        </article>
-        <article class="kpi-mini">
-            <div class="mini-ring ring-2"><i class="bi bi-person-badge"></i></div>
-            <div class="mini-value">{{ leads_count }}</div>
-            <div class="mini-label">Leads</div>
-        </article>
-        <article class="kpi-mini">
-            <div class="mini-ring ring-3"><i class="bi bi-cash-stack"></i></div>
-            <div class="mini-value">{{ deals_count }}</div>
-            <div class="mini-label">Deals</div>
-        </article>
-        <article class="kpi-mini">
-            <div class="mini-ring ring-4"><i class="bi bi-activity"></i></div>
-            <div class="mini-value">{{ activities_count }}</div>
-            <div class="mini-label">Activities</div>
-        </article>
-    </section>
-
-    <section class="dash-card chart-card">
-        <div class="panel-header mb-1">
-            <div>
-                <div class="section-title">Deal Value Trend</div>
-                <div class="section-subtitle">Latest deals from your database</div>
-            </div>
-            <span class="badge bg-primary-subtle text-primary">Pipeline {{ total_pipeline_value }}</span>
-        </div>
-        <div class="chart-wrap">
-            <canvas id="dashboardRevenueChart" height="150"></canvas>
-        </div>
-    </section>
-
-    <section class="dash-card timeline-compact-card">
-        <div class="panel-header mb-1">
-            <div>
-                <div class="section-title">Recent Contacts</div>
-                <div class="section-subtitle">Newest relationships added to CRM</div>
-            </div>
-            <a class="btn btn-secondary btn-sm" href="{% url 'contacts' %}">All</a>
-        </div>
-        <div class="timeline-compact">
-            {% for contact in recent_contacts %}
-            <article class="timeline-row-compact">
-                <span class="dot"></span>
-                <div class="timeline-row-main">
-                    <div class="timeline-row-title">{{ contact.full_name|default:"-" }}</div>
-                    <div class="timeline-row-sub">{{ contact.email|default:contact.phone|default:"-" }}</div>
+<div>
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-xl-4">
+            <section class="dash-card hero-compact">
+                <div>
+                    <div class="page-kicker mb-1">Welcome back</div>
+                    <h1 class="hero-compact-title">Revenue cockpit for your team.</h1>
+                    <div class="hero-footnote">Today • {% now "l, d M Y" %}</div>
                 </div>
-                <span class="badge compact-badge bg-light text-dark">{{ contact.role|default:"Contact" }}</span>
-            </article>
-            {% empty %}
-            <div class="empty-state">No contacts available.</div>
-            {% endfor %}
-        </div>
-    </section>
-
-    <section class="dash-card timeline-compact-card">
-        <div class="panel-header mb-1">
-            <div>
-                <div class="section-title">Activity Timeline</div>
-                <div class="section-subtitle">Latest touchpoints</div>
-            </div>
-            <a class="btn btn-secondary btn-sm" href="{% url 'activities' %}">All</a>
-        </div>
-        <div class="timeline-compact">
-            {% for activity in recent_activities %}
-            <article class="timeline-row-compact">
-                <span class="dot"></span>
-                <div class="timeline-row-main">
-                    <div class="timeline-row-title">{% if activity.body %}{{ activity.body }}{% elif activity.outcome %}{{ activity.outcome }}{% else %}Activity {{ activity.id }}{% endif %}</div>
-                    <div class="timeline-row-sub">{{ activity.occurred_at|default:"No date" }}</div>
+                <div class="hero-actions compact-actions">
+                    <a class="btn btn-primary btn-sm" href="{% url 'deals' %}"><i class="bi bi-plus-lg me-1"></i>New Deal</a>
+                    <a class="btn btn-secondary btn-sm" href="{% url 'activities' %}"><i class="bi bi-activity me-1"></i>Log Activity</a>
+                    <a class="btn btn-secondary btn-sm" href="{% url 'contacts' %}"><i class="bi bi-person-plus me-1"></i>Add Contact</a>
                 </div>
-                <span class="badge compact-badge bg-primary-subtle text-primary">{{ activity.direction|default:"Record" }}</span>
-            </article>
-            {% empty %}
-            <div class="empty-state">No recent activity.</div>
-            {% endfor %}
+            </section>
         </div>
-    </section>
-
-    <section class="dash-card timeline-compact-card">
-        <div class="panel-header mb-1">
-            <div>
-                <div class="section-title">Latest Leads</div>
-                <div class="section-subtitle">Fresh opportunities entering pipeline</div>
-            </div>
-            <a class="btn btn-secondary btn-sm" href="{% url 'leads' %}">All</a>
-        </div>
-        <div class="timeline-compact">
-            {% for lead in recent_leads %}
-            <article class="timeline-row-compact">
-                <span class="dot"></span>
-                <div class="timeline-row-main">
-                    <div class="timeline-row-title">{{ lead.full_name|default:"-" }}</div>
-                    <div class="timeline-row-sub">{{ lead.normalized_email|default:lead.normalized_phone|default:"-" }}</div>
+        <div class="col-12 col-xl-8">
+            <div class="row g-3">
+                <div class="col-6 col-md-3">
+                    <section class="dash-card kpi-mini-card">
+                        <div class="mini-ring ring-1"><i class="bi bi-people"></i></div>
+                        <div class="mini-value">{{ contacts_count }}</div>
+                        <div class="mini-label">Contacts</div>
+                    </section>
                 </div>
-                <span class="badge compact-badge bg-light text-dark">{{ lead.created_at|default:"-" }}</span>
-            </article>
-            {% empty %}
-            <div class="empty-state">No leads available.</div>
-            {% endfor %}
-        </div>
-    </section>
-
-    <section class="dash-card agenda-card-pro">
-        <div class="panel-header mb-1">
-            <div>
-                <div class="section-title">Upcoming Follow-ups</div>
-                <div class="section-subtitle">Tasks ordered by due date</div>
-            </div>
-            <a class="btn btn-secondary btn-sm" href="{% url 'tasks' %}">Tasks</a>
-        </div>
-        <div class="agenda-pro-list">
-            {% for task in upcoming_followups %}
-            <article class="agenda-pro-item">
-                <div class="agenda-pro-main">
-                    <div class="agenda-pro-title">{{ task.title|default:"-" }}</div>
-                    <div class="agenda-pro-sub">{{ task.description|default:"-" }}</div>
+                <div class="col-6 col-md-3">
+                    <section class="dash-card kpi-mini-card">
+                        <div class="mini-ring ring-2"><i class="bi bi-person-badge"></i></div>
+                        <div class="mini-value">{{ leads_count }}</div>
+                        <div class="mini-label">Leads</div>
+                    </section>
                 </div>
-                <span class="badge compact-badge bg-warning-subtle text-warning">{{ task.due_at|default:"No due date" }}</span>
-            </article>
-            {% empty %}
-            <div class="empty-state">No follow-up tasks available.</div>
-            {% endfor %}
-        </div>
-    </section>
-
-    <section class="dash-card timeline-compact-card">
-        <div class="panel-header mb-1">
-            <div>
-                <div class="section-title">Sales Summary</div>
-                <div class="section-subtitle">Database-backed performance snapshot</div>
+                <div class="col-6 col-md-3">
+                    <section class="dash-card kpi-mini-card">
+                        <div class="mini-ring ring-3"><i class="bi bi-cash-stack"></i></div>
+                        <div class="mini-value">{{ deals_count }}</div>
+                        <div class="mini-label">Deals</div>
+                    </section>
+                </div>
+                <div class="col-6 col-md-3">
+                    <section class="dash-card kpi-mini-card">
+                        <div class="mini-ring ring-4"><i class="bi bi-activity"></i></div>
+                        <div class="mini-value">{{ activities_count }}</div>
+                        <div class="mini-label">Activities</div>
+                    </section>
+                </div>
             </div>
         </div>
-        <div class="timeline-compact">
-            <article class="timeline-row-compact">
-                <span class="dot"></span>
-                <div class="timeline-row-main">
-                    <div class="timeline-row-title">Total Pipeline Value</div>
-                    <div class="timeline-row-sub">Based on expected or won amounts</div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-xl-8">
+            <section class="dash-card chart-card">
+                <div class="panel-header mb-1">
+                    <div>
+                        <div class="section-title">Deal Value Trend</div>
+                        <div class="section-subtitle">Latest deals from your database</div>
+                    </div>
+                    <span class="badge bg-primary-subtle text-primary">Pipeline {{ total_pipeline_value }}</span>
                 </div>
-                <span class="badge compact-badge bg-primary-subtle text-primary">{{ total_pipeline_value }}</span>
-            </article>
-            <article class="timeline-row-compact">
-                <span class="dot"></span>
-                <div class="timeline-row-main"><div class="timeline-row-title">Open Activities</div></div>
-                <span class="badge compact-badge bg-light text-dark">{{ activities_count }}</span>
-            </article>
-            <article class="timeline-row-compact">
-                <span class="dot"></span>
-                <div class="timeline-row-main"><div class="timeline-row-title">Open Tickets</div></div>
-                <span class="badge compact-badge bg-light text-dark">{{ tickets_count }}</span>
-            </article>
+                <div class="chart-wrap">
+                    <canvas id="dashboardRevenueChart" height="150"></canvas>
+                </div>
+            </section>
         </div>
-    </section>
+        <div class="col-12 col-xl-4">
+            <section class="dash-card dashboard-today-card">
+                <div class="dashboard-today-head">
+                    <div>
+                        <div class="page-kicker">Today's Tasks</div>
+                        <div class="section-title" id="dashboardTodayDate">{{ task_dashboard.date }}</div>
+                    </div>
+                    <div class="dashboard-today-stats">
+                        <span><i class="bi bi-clock"></i><strong id="dashboardCurrentTime">--:--:--</strong></span>
+                        <span><i class="bi bi-list-check"></i><strong id="dashboardTodayCount">{{ task_dashboard.today_count }}</strong> tasks</span>
+                    </div>
+                </div>
+                <div class="dashboard-focus-pane">
+                    <div class="dashboard-pane-head">
+                        <div>
+                            <div class="section-title">Today's Tasks</div>
+                            <div class="section-subtitle">Tap the circle to complete. Tap the row to edit.</div>
+                        </div>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'tasks' %}?due=today">Open Tasks</a>
+                    </div>
+                    <div class="dashboard-task-list" id="dashboardTodayTasks">
+                        {% for task in task_dashboard.today_tasks %}
+                        <button type="button" class="dashboard-task-row dashboard-task-edit-trigger {% if task.is_completed %}is-completed{% endif %}" data-bs-toggle="modal" data-bs-target="#taskEditModal" data-task-edit-id="{{ task.id }}" data-task-id="{{ task.id }}" data-task-title="{{ task.title|default:'' }}" data-task-description="{{ task.description|default:'' }}" data-task-due-at="{{ task.due_at|default:'' }}" data-task-priority="{{ task.priority }}" data-task-assignee="{{ task.assignee_id|default:'' }}" data-task-status="{{ task.status }}">
+                            <span class="task-complete-circle {% if task.is_completed %}is-checked{% endif %}" role="button" tabindex="0" aria-label="{% if task.is_completed %}Mark task pending{% else %}Mark task completed{% endif %}" data-task-toggle="{{ task.id }}" data-next-status="{% if task.is_completed %}Pending{% else %}Completed{% endif %}"></span>
+                            <span class="dashboard-task-main"><strong data-task-title-id="{{ task.id }}">{{ task.title }}</strong><small data-task-meta-id="{{ task.id }}">{{ task.priority }} priority</small></span>
+                            <span class="notification-priority priority-{{ task.priority|lower }}"></span>
+                            <span class="dashboard-task-time">{{ task.due_time|default:'23:59' }}</span>
+                        </button>
+                        {% empty %}
+                        <div class="empty-state dashboard-empty-state">No tasks scheduled for today. Your desk is suspiciously calm.</div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-xl-6">
+            <section class="dash-card timeline-compact-card">
+                <div class="panel-header mb-1">
+                    <div>
+                        <div class="section-title">Recent Contacts</div>
+                        <div class="section-subtitle">Newest relationships added to CRM</div>
+                    </div>
+                    <a class="btn btn-secondary btn-sm" href="{% url 'contacts' %}">All</a>
+                </div>
+                <div class="timeline-compact">
+                    {% for contact in recent_contacts %}
+                    <article class="timeline-row-compact">
+                        <span class="dot"></span>
+                        <div class="timeline-row-main">
+                            <div class="timeline-row-title">{{ contact.full_name|default:"-" }}</div>
+                            <div class="timeline-row-sub">{{ contact.email|default:contact.phone|default:"-" }}</div>
+                        </div>
+                        <span class="badge compact-badge bg-light text-dark">{{ contact.role|default:"Contact" }}</span>
+                    </article>
+                    {% empty %}
+                    <div class="empty-state">No contacts available.</div>
+                    {% endfor %}
+                </div>
+            </section>
+        </div>
+        <div class="col-12 col-xl-6">
+            <section class="dash-card timeline-compact-card">
+                <div class="panel-header mb-1">
+                    <div>
+                        <div class="section-title">Activity Timeline</div>
+                        <div class="section-subtitle">Latest touchpoints</div>
+                    </div>
+                    <a class="btn btn-secondary btn-sm" href="{% url 'activities' %}">All</a>
+                </div>
+                <div class="timeline-compact">
+                    {% for activity in recent_activities %}
+                    <article class="timeline-row-compact">
+                        <span class="dot"></span>
+                        <div class="timeline-row-main">
+                            <div class="timeline-row-title">{% if activity.body %}{{ activity.body }}{% elif activity.outcome %}{{ activity.outcome }}{% else %}Activity {{ activity.id }}{% endif %}</div>
+                            <div class="timeline-row-sub">{{ activity.occurred_at|default:"No date" }}</div>
+                        </div>
+                        <span class="badge compact-badge bg-primary-subtle text-primary">{{ activity.direction|default:"Record" }}</span>
+                    </article>
+                    {% empty %}
+                    <div class="empty-state">No recent activity.</div>
+                    {% endfor %}
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div class="row g-3 mt-3">
+        <div class="col-12 col-xl-6">
+            <section class="dash-card timeline-compact-card">
+                <div class="panel-header mb-1">
+                    <div>
+                        <div class="section-title">Latest Leads</div>
+                        <div class="section-subtitle">Fresh opportunities entering pipeline</div>
+                    </div>
+                    <a class="btn btn-secondary btn-sm" href="{% url 'leads' %}">All</a>
+                </div>
+                <div class="timeline-compact">
+                    {% for lead in recent_leads %}
+                    <article class="timeline-row-compact">
+                        <span class="dot"></span>
+                        <div class="timeline-row-main">
+                            <div class="timeline-row-title">{{ lead.full_name|default:"-" }}</div>
+                            <div class="timeline-row-sub">{{ lead.normalized_email|default:lead.normalized_phone|default:"-" }}</div>
+                        </div>
+                        <span class="badge compact-badge bg-light text-dark">{{ lead.created_at|default:"-" }}</span>
+                    </article>
+                    {% empty %}
+                    <div class="empty-state">No leads available.</div>
+                    {% endfor %}
+                </div>
+            </section>
+        </div>
+        <div class="col-12 col-xl-6">
+            <section class="dash-card agenda-card-pro">
+                <div class="panel-header mb-1">
+                    <div>
+                        <div class="section-title">Upcoming Follow-ups</div>
+                        <div class="section-subtitle">Tasks ordered by due date</div>
+                    </div>
+                    <a class="btn btn-secondary btn-sm" href="{% url 'tasks' %}">Tasks</a>
+                </div>
+                <div class="agenda-pro-list">
+                    {% for task in upcoming_followups %}
+                    <article class="agenda-pro-item">
+                        <div class="agenda-pro-main">
+                            <div class="agenda-pro-title">{{ task.title|default:"-" }}</div>
+                            <div class="agenda-pro-sub">{{ task.description|default:"-" }}</div>
+                        </div>
+                        <span class="badge compact-badge bg-warning-subtle text-warning">{{ task.due_at|default:"No due date" }}</span>
+                    </article>
+                    {% empty %}
+                    <div class="empty-state">No follow-up tasks available.</div>
+                    {% endfor %}
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div class="row g-3 mt-3">
+        <div class="col-12">
+            <section class="dash-card timeline-compact-card">
+                <div class="panel-header mb-1">
+                    <div>
+                        <div class="section-title">Sales Summary</div>
+                        <div class="section-subtitle">Database-backed performance snapshot</div>
+                    </div>
+                </div>
+                <div class="timeline-compact">
+                    <article class="timeline-row-compact">
+                        <span class="dot"></span>
+                        <div class="timeline-row-main">
+                            <div class="timeline-row-title">Total Pipeline Value</div>
+                            <div class="timeline-row-sub">Based on expected or won amounts</div>
+                        </div>
+                        <span class="badge compact-badge bg-primary-subtle text-primary">{{ total_pipeline_value }}</span>
+                    </article>
+                    <article class="timeline-row-compact">
+                        <span class="dot"></span>
+                        <div class="timeline-row-main"><div class="timeline-row-title">Open Activities</div></div>
+                        <span class="badge compact-badge bg-light text-dark">{{ activities_count }}</span>
+                    </article>
+                    <article class="timeline-row-compact">
+                        <span class="dot"></span>
+                        <div class="timeline-row-main"><div class="timeline-row-title">Open Tickets</div></div>
+                        <span class="badge compact-badge bg-light text-dark">{{ tickets_count }}</span>
+                    </article>
+                </div>
+            </section>
+        </div>
+    </div>
 </div>
 {% endblock %}
 

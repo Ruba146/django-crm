@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+
+{% block title %}My Profile | Northstar CRM{% endblock %}
+{% block page_title %}My Profile{% endblock %}
+{% block page_breadcrumb %}Workspace / Profile{% endblock %}
+{% block page_subtitle %}Your account details{% endblock %}
+
+{% block content %}
+<div class="card list-card">
+    <div class="card-body">
+        <h2 class="page-title mb-3">Profile</h2>
+        {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags|default:'info' }} py-2 mb-2">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+
+        <form method="post" class="row g-2">
+            {% csrf_token %}
+            <div class="col-md-6">
+                <label class="form-label">Username</label>
+                <input class="form-control" value="{{ request.user.username }}" disabled>
+                <div class="form-text">Username and role are managed by administrators.</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Email</label>
+                <input class="form-control" name="email" value="{{ request.user.email|default:'' }}" type="email">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">First Name</label>
+                <input class="form-control" name="first_name" value="{{ request.user.first_name|default:'' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Last Name</label>
+                <input class="form-control" name="last_name" value="{{ request.user.last_name|default:'' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">New Password (optional)</label>
+                <input class="form-control" name="password" type="password">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Confirm New Password</label>
+                <input class="form-control" name="confirm_password" type="password">
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+                <button class="btn btn-primary" type="submit">Save Profile</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,24 +1,37 @@
 {% if page_obj %}
 <nav aria-label="{{ aria_label|default:'Pagination' }}" class="compact-pagination-wrap mt-2">
-    <div class="compact-pagination-summary">
-        Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }}{% if item_label %} {{ item_label }}{% endif %}
-    </div>
     {% if page_obj.paginator.num_pages > 1 %}
-    <ul class="pagination pagination-sm compact-pagination justify-content-center mb-0">
-        {% if page_obj.has_previous %}
-        <li class="page-item"><a class="page-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.previous_page_number }}">&#9664;</a></li>
-        {% else %}
-        <li class="page-item disabled"><span class="page-link">&#9664;</span></li>
-        {% endif %}
+    <form method="get" class="compact-pagination-form">
+        {% for key, value in page_query_params %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}">
+        {% endfor %}
+        <div class="compact-pagination-row">
+            <div class="compact-pagination-controls">
+                {% if page_obj.has_previous %}
+                <a class="btn btn-sm btn-outline-primary compact-page-nav" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.previous_page_number }}">&#9664;</a>
+                {% else %}
+                <span class="btn btn-sm btn-outline-primary disabled compact-page-nav">&#9664;</span>
+                {% endif %}
 
-        <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+                <div class="compact-page-jump">
+                    <input class="form-control form-control-sm compact-page-input" type="number" name="page" min="1" max="{{ page_obj.paginator.num_pages }}" value="{{ page_obj.number }}" aria-label="Page number">
+                    <span class="compact-page-separator">/ {{ page_obj.paginator.num_pages }}</span>
+                </div>
 
-        {% if page_obj.has_next %}
-        <li class="page-item"><a class="page-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.next_page_number }}">&#9654;</a></li>
-        {% else %}
-        <li class="page-item disabled"><span class="page-link">&#9654;</span></li>
-        {% endif %}
-    </ul>
+                <button class="btn btn-sm btn-primary compact-page-go" type="submit">Go</button>
+
+                {% if page_obj.has_next %}
+                <a class="btn btn-sm btn-outline-primary compact-page-nav" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.next_page_number }}">&#9654;</a>
+                {% else %}
+                <span class="btn btn-sm btn-outline-primary disabled compact-page-nav">&#9654;</span>
+                {% endif %}
+            </div>
+
+            <div class="compact-pagination-summary">
+                Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }}{% if item_label %} {{ item_label }}{% endif %}
+            </div>
+        </div>
+    </form>
     {% endif %}
 </nav>
 {% endif %}

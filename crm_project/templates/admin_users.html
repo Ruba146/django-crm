@@ -1,0 +1,433 @@
+{% extends 'base.html' %}
+
+{% block title %}Users Management | Northstar CRM{% endblock %}
+{% block page_title %}Users Management{% endblock %}
+{% block page_breadcrumb %}Administration / Users{% endblock %}
+{% block page_subtitle %}Manage users, roles, and permissions{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div>
+        <p class="text-muted mb-1">Administration</p>
+        <h2 class="page-title mb-0">Users</h2>
+    </div>
+    {% if can.users_create %}
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal"><i class="bi bi-plus-lg me-2"></i>Add User</button>
+    {% endif %}
+</div>
+
+{% if messages %}
+{% for message in messages %}
+<div class="alert alert-{{ message.tags|default:'info' }} py-2 mb-2">{{ message }}</div>
+{% endfor %}
+{% endif %}
+
+<div class="card list-card mb-2">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label text-muted">Search users</label>
+                <input class="form-control" name="q" value="{{ query }}" placeholder="Username, name, email">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted">Status</label>
+                <select class="form-select" name="status">
+                    <option value="">All</option>
+                    <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                    <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Disabled</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label text-muted">Role</label>
+                <select class="form-select" name="role">
+                    <option value="">All Roles</option>
+                    {% for group in role_groups %}
+                    <option value="{{ group.name }}" {% if role_filter == group.name %}selected{% endif %}>{{ group.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex gap-2">
+                <button class="btn btn-primary w-100" type="submit"><i class="bi bi-search"></i></button>
+                <a class="btn btn-outline-secondary" href="{% url 'users' %}"><i class="bi bi-arrow-counterclockwise"></i></a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card list-card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Avatar</th>
+                        <th><a class="text-decoration-none" href="?{{ page_query }}&sort=username&order={% if sort == 'username' and order == 'asc' %}desc{% else %}asc{% endif %}">Username</a></th>
+                        <th><a class="text-decoration-none" href="?{{ page_query }}&sort=full_name&order={% if sort == 'full_name' and order == 'asc' %}desc{% else %}asc{% endif %}">Full Name</a></th>
+                        <th><a class="text-decoration-none" href="?{{ page_query }}&sort=email&order={% if sort == 'email' and order == 'asc' %}desc{% else %}asc{% endif %}">Email</a></th>
+                        <th>Role</th>
+                        <th><a class="text-decoration-none" href="?{{ page_query }}&sort=status&order={% if sort == 'status' and order == 'asc' %}desc{% else %}asc{% endif %}">Status</a></th>
+                        <th><a class="text-decoration-none" href="?{{ page_query }}&sort=last_login&order={% if sort == 'last_login' and order == 'asc' %}desc{% else %}asc{% endif %}">Last Login</a></th>
+                        <th><a class="text-decoration-none" href="?{{ page_query }}&sort=date_joined&order={% if sort == 'date_joined' and order == 'asc' %}desc{% else %}asc{% endif %}">Created Date</a></th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user_item in users %}
+                    <tr>
+                        <td><span class="avatar">{{ user_item.username|slice:":1"|upper }}</span></td>
+                        <td>{{ user_item.username }}</td>
+                        <td>{{ user_item.get_full_name|default:'-' }}</td>
+                        <td>{{ user_item.email|default:'-' }}</td>
+                        <td>{% if user_item.groups.all %}{% for group in user_item.groups.all %}<span class="badge bg-primary-subtle text-primary me-1">{{ group.name }}</span>{% endfor %}{% else %}<span class="badge bg-secondary-subtle text-secondary">Unassigned</span>{% endif %}</td>
+                        <td>{% if user_item.is_active %}<span class="badge bg-success-subtle text-success">Active</span>{% else %}<span class="badge bg-danger-subtle text-danger">Disabled</span>{% endif %}</td>
+                        <td>{{ user_item.last_login|date:'Y-m-d H:i'|default:'-' }}</td>
+                        <td>{{ user_item.date_joined|date:'Y-m-d H:i' }}</td>
+                        <td class="d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#viewUserModal{{ user_item.id }}" title="View"><i class="bi bi-eye"></i></button>
+                            {% if can.users_edit %}
+                            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editUserModal{{ user_item.id }}" title="Edit"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#resetPasswordModal{{ user_item.id }}" title="Reset Password"><i class="bi bi-key"></i></button>
+                            {% endif %}
+                            {% if can.users_edit and user_item != request.user %}
+                            <form method="post" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="user_id" value="{{ user_item.id }}">
+                                <input type="hidden" name="action" value="{% if user_item.is_active %}deactivate_user{% else %}activate_user{% endif %}">
+                                <button class="btn btn-sm {% if user_item.is_active %}btn-outline-secondary{% else %}btn-outline-success{% endif %}" type="submit" title="{% if user_item.is_active %}Deactivate{% else %}Activate{% endif %}">
+                                    <i class="bi {% if user_item.is_active %}bi-slash-circle{% else %}bi-check-circle{% endif %}"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                            {% if can.users_delete and user_item != request.user %}
+                            <form method="post" onsubmit="return confirm('Delete this user?');" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete_user">
+                                <input type="hidden" name="user_id" value="{{ user_item.id }}">
+                                <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+
+                    <div class="modal fade" id="viewUserModal{{ user_item.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <div class="modal-header"><h5 class="modal-title">User Details: {{ user_item.username }}</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
+                                <div class="modal-body">
+                                    <div class="row g-2">
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Username</div><div class="crm-field-value">{{ user_item.username }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Full Name</div><div class="crm-field-value">{{ user_item.get_full_name|default:'-' }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Email</div><div class="crm-field-value">{{ user_item.email|default:'-' }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Status</div><div class="crm-field-value">{% if user_item.is_active %}Active{% else %}Inactive{% endif %}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Last Login</div><div class="crm-field-value">{{ user_item.last_login|date:'Y-m-d H:i'|default:'-' }}</div></div></div>
+                                        <div class="col-md-6"><div class="crm-field"><div class="crm-field-label">Date Joined</div><div class="crm-field-value">{{ user_item.date_joined|date:'Y-m-d H:i' }}</div></div></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {% if can.users_edit %}
+                    <div class="modal fade" id="editUserModal{{ user_item.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <form method="post">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="update_user">
+                                    <input type="hidden" name="user_id" value="{{ user_item.id }}">
+                                    <div class="modal-header"><h5 class="modal-title">Edit User: {{ user_item.username }}</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
+                                    <div class="modal-body">
+                                        <div class="row g-2">
+                                            <div class="col-md-6"><label class="form-label">Username</label><input class="form-control" name="username" value="{{ user_item.username }}"></div>
+                                            <div class="col-md-6"><label class="form-label">Email</label><input class="form-control" name="email" value="{{ user_item.email }}"></div>
+                                            <div class="col-md-6"><label class="form-label">First Name</label><input class="form-control" name="first_name" value="{{ user_item.first_name }}"></div>
+                                            <div class="col-md-6"><label class="form-label">Last Name</label><input class="form-control" name="last_name" value="{{ user_item.last_name }}"></div>
+                                            <div class="col-md-6"><label class="form-label">New Password (optional)</label><input class="form-control" name="password" type="password"></div>
+                                            <div class="col-md-6"><label class="form-label">Confirm Password</label><input class="form-control" name="confirm_password" type="password"></div>
+                                            <div class="col-md-12 form-check mt-2 ms-1"><input class="form-check-input" type="checkbox" name="is_active" {% if user_item.is_active %}checked{% endif %}><label class="form-check-label">Active</label></div>
+                                            {% if can.users_manage_roles %}
+                                            <div class="col-md-6"><label class="form-label">Role</label><select class="form-select permission-role-select" id="editRole{{ user_item.id }}" name="role_name">{% for group in role_groups %}<option value="{{ group.name }}" {% if group in user_item.groups.all %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></div>
+                                            {% endif %}
+                                            {% if can.users_manage_permissions %}
+                                            <div class="col-md-12">
+                                                <label class="form-label">Permissions</label>
+                                                <div class="permission-editor" data-role-select-id="editRole{{ user_item.id }}">
+                                                    <div class="input-group input-group-sm mb-2">
+                                                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                                        <input type="text" class="form-control permission-search" placeholder="Search permissions...">
+                                                    </div>
+                                                    <div class="d-flex flex-wrap gap-2 mb-2">
+                                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-perm-action="select-all">Select All</button>
+                                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-perm-action="clear-all">Clear All</button>
+                                                        <button type="button" class="btn btn-sm btn-outline-primary" data-perm-action="reset-role-defaults">Reset to Role Defaults</button>
+                                                    </div>
+                                                    <div class="border rounded p-2 permission-list" style="max-height: 280px; overflow-y: auto;">
+                                                        {% for permission_group in grouped_permissions %}
+                                                        <div class="permission-group mb-2" data-group="{{ permission_group.group_key }}">
+                                                            <div class="small fw-semibold text-muted mb-1">{{ permission_group.group_label }}</div>
+                                                            <div class="row g-1">
+                                                                {% for permission in permission_group.items %}
+                                                                <div class="col-md-6 permission-item" data-search-text="{{ permission.codename }} {{ permission.label|lower }}">
+                                                                    <div class="form-check">
+                                                                        <input class="form-check-input permission-checkbox" type="checkbox" name="permission_ids" value="{{ permission.id }}" id="editUser{{ user_item.id }}Perm{{ permission.id }}" {% if permission.id in user_item.direct_permission_ids %}checked{% endif %}>
+                                                                        <label class="form-check-label" for="editUser{{ user_item.id }}Perm{{ permission.id }}">{{ permission_group.group_label }} - {{ permission.action_label }} <span class="text-muted">({{ permission.codename }})</span></label>
+                                                                    </div>
+                                                                </div>
+                                                                {% endfor %}
+                                                            </div>
+                                                        </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal fade" id="resetPasswordModal{{ user_item.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog">
+                            <div class="modal-content">
+                                <form method="post">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="reset_password">
+                                    <input type="hidden" name="user_id" value="{{ user_item.id }}">
+                                    <div class="modal-header"><h5 class="modal-title">Reset Password: {{ user_item.username }}</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
+                                    <div class="modal-body">
+                                        <div class="mb-2"><label class="form-label">New Password</label><input class="form-control" name="password" type="password" required></div>
+                                        <div class="mb-2"><label class="form-label">Confirm Password</label><input class="form-control" name="confirm_password" type="password" required></div>
+                                    </div>
+                                    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-warning" type="submit">Reset Password</button></div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% empty %}
+                    <tr><td colspan="9" class="text-center text-muted">No users found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% include 'includes/compact_pagination.html' with aria_label='Users pagination' %}
+    </div>
+</div>
+
+{% if can.users_manage_permissions %}
+<div class="card list-card mt-2">
+    <div class="card-body">
+        <h5 class="mb-2">Manage Role Permissions</h5>
+        <form method="post" class="row g-2 align-items-end" id="rolePermissionsForm">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="update_role_permissions">
+            <div class="col-md-4">
+                <label class="form-label">Role</label>
+                <select class="form-select permission-role-select" id="rolePermissionsRole" name="role_name">
+                    {% for group in role_groups %}
+                    {% if group.name != 'System Administrator' %}
+                    <option value="{{ group.name }}">{{ group.name }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-8 permission-editor" data-role-select-id="rolePermissionsRole">
+                <label class="form-label">Permissions</label>
+                <div class="input-group input-group-sm mb-2">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control permission-search" placeholder="Search permissions...">
+                </div>
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-perm-action="select-all">Select All</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-perm-action="clear-all">Clear All</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-perm-action="reset-role-defaults">Reset to Role Defaults</button>
+                </div>
+                <div class="border rounded p-2 permission-list" style="max-height: 280px; overflow-y: auto;">
+                    {% for permission_group in grouped_permissions %}
+                    <div class="permission-group mb-2" data-group="{{ permission_group.group_key }}">
+                        <div class="small fw-semibold text-muted mb-1">{{ permission_group.group_label }}</div>
+                        <div class="row g-1">
+                            {% for permission in permission_group.items %}
+                            <div class="col-md-6 permission-item" data-search-text="{{ permission.codename }} {{ permission.label|lower }}">
+                                <div class="form-check">
+                                    <input class="form-check-input permission-checkbox" type="checkbox" name="permission_ids" value="{{ permission.id }}" id="rolePerm{{ permission.id }}">
+                                    <label class="form-check-label" for="rolePerm{{ permission.id }}">{{ permission_group.group_label }} - {{ permission.action_label }} <span class="text-muted">({{ permission.codename }})</span></label>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+                <button class="btn btn-outline-primary" type="submit">Update Role Permissions</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% if can.users_create %}
+<div class="modal fade" id="createUserModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create_user">
+                <div class="modal-header"><h5 class="modal-title">Create User</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-md-6"><label class="form-label">Username</label><input class="form-control" name="username" required></div>
+                        <div class="col-md-6"><label class="form-label">Email</label><input class="form-control" name="email" type="email"></div>
+                        <div class="col-md-6"><label class="form-label">First Name</label><input class="form-control" name="first_name"></div>
+                        <div class="col-md-6"><label class="form-label">Last Name</label><input class="form-control" name="last_name"></div>
+                        {% if can.users_manage_roles %}
+                        <div class="col-md-6"><label class="form-label">Role</label><select class="form-select permission-role-select" id="createUserRole" name="role_name">{% for group in role_groups %}<option value="{{ group.name }}" {% if group.name == 'Viewer' %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></div>
+                        {% endif %}
+                        <div class="col-md-6 form-check mt-4 ms-1"><input class="form-check-input" type="checkbox" name="is_active" checked><label class="form-check-label">Active</label></div>
+                        <div class="col-md-6"><label class="form-label">Password</label><input class="form-control" name="password" type="password" required></div>
+                        <div class="col-md-6"><label class="form-label">Confirm Password</label><input class="form-control" name="confirm_password" type="password" required></div>
+                        {% if can.users_manage_permissions %}
+                        <div class="col-md-12">
+                            <label class="form-label">Direct Permissions (optional)</label>
+                            <div class="permission-editor" data-role-select-id="createUserRole">
+                                <div class="input-group input-group-sm mb-2">
+                                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                    <input type="text" class="form-control permission-search" placeholder="Search permissions...">
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 mb-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-perm-action="select-all">Select All</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-perm-action="clear-all">Clear All</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-perm-action="reset-role-defaults">Reset to Role Defaults</button>
+                                </div>
+                                <div class="border rounded p-2 permission-list" style="max-height: 280px; overflow-y: auto;">
+                                    {% for permission_group in grouped_permissions %}
+                                    <div class="permission-group mb-2" data-group="{{ permission_group.group_key }}">
+                                        <div class="small fw-semibold text-muted mb-1">{{ permission_group.group_label }}</div>
+                                        <div class="row g-1">
+                                            {% for permission in permission_group.items %}
+                                            <div class="col-md-6 permission-item" data-search-text="{{ permission.codename }} {{ permission.label|lower }}">
+                                                <div class="form-check">
+                                                    <input class="form-check-input permission-checkbox" type="checkbox" name="permission_ids" value="{{ permission.id }}" id="createUserPerm{{ permission.id }}">
+                                                    <label class="form-check-label" for="createUserPerm{{ permission.id }}">{{ permission_group.group_label }} - {{ permission.action_label }} <span class="text-muted">({{ permission.codename }})</span></label>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Create User</button></div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{{ role_permissions_json|json_script:"role-permissions-json" }}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(() => {
+    const rolePermissionsNode = document.getElementById("role-permissions-json");
+    const rolePermissions = rolePermissionsNode ? JSON.parse(rolePermissionsNode.textContent) : {};
+
+    class PermissionEditor {
+        constructor(root) {
+            this.root = root;
+            this.searchInput = root.querySelector(".permission-search");
+            this.checkboxSelector = ".permission-checkbox";
+            const roleSelectId = root.getAttribute("data-role-select-id");
+            this.roleSelect = roleSelectId ? document.getElementById(roleSelectId) : null;
+            this.resetButton = root.querySelector('[data-perm-action="reset-role-defaults"]');
+            this.bindEvents();
+        }
+
+        getCheckboxes() {
+            return Array.from(this.root.querySelectorAll(this.checkboxSelector));
+        }
+
+        filter(searchValue) {
+            const normalized = (searchValue || "").trim().toLowerCase();
+            this.root.querySelectorAll(".permission-item").forEach((item) => {
+                const text = (item.getAttribute("data-search-text") || "").toLowerCase();
+                item.style.display = !normalized || text.includes(normalized) ? "" : "none";
+            });
+            this.root.querySelectorAll(".permission-group").forEach((group) => {
+                const hasVisible = Array.from(group.querySelectorAll(".permission-item")).some((item) => item.style.display !== "none");
+                group.style.display = hasVisible ? "" : "none";
+            });
+        }
+
+        selectAll() {
+            this.getCheckboxes().forEach((checkbox) => {
+                checkbox.checked = true;
+            });
+        }
+
+        clearAll() {
+            this.getCheckboxes().forEach((checkbox) => {
+                checkbox.checked = false;
+            });
+        }
+
+        applyRoleDefaults() {
+            if (!this.roleSelect) {
+                return;
+            }
+            const selectedRole = this.roleSelect.value;
+            const defaults = rolePermissions[selectedRole] || [];
+            const allowedIds = new Set(defaults.map((value) => String(value)));
+            this.getCheckboxes().forEach((checkbox) => {
+                checkbox.checked = allowedIds.has(String(checkbox.value));
+            });
+        }
+
+        bindEvents() {
+            if (this.searchInput) {
+                this.searchInput.addEventListener("input", (event) => this.filter(event.target.value));
+            }
+
+            this.root.querySelectorAll("[data-perm-action]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    const action = button.getAttribute("data-perm-action");
+                    if (action === "select-all") {
+                        this.selectAll();
+                    } else if (action === "clear-all") {
+                        this.clearAll();
+                    } else if (action === "reset-role-defaults") {
+                        this.applyRoleDefaults();
+                    }
+                });
+            });
+
+            if (this.roleSelect) {
+                this.roleSelect.addEventListener("change", () => this.applyRoleDefaults());
+            }
+            if (!this.roleSelect && this.resetButton) {
+                this.resetButton.disabled = true;
+            }
+        }
+    }
+
+    document.querySelectorAll(".permission-editor").forEach((root) => {
+        new PermissionEditor(root);
+    });
+
+    const rolePermissionsRole = document.getElementById("rolePermissionsRole");
+    if (rolePermissionsRole) {
+        rolePermissionsRole.dispatchEvent(new Event("change"));
+    }
+})();
+</script>
+{% endblock %}

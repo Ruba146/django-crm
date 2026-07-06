@@ -12,11 +12,14 @@
         <h2 class="page-title">Activities</h2>
         <p class="page-subtitle">Contact-centered timeline backed by live records.</p>
     </div>
+    {% if can.activities_create %}
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#activityFormModal">
         <i class="bi bi-plus-lg me-2"></i>New activity
     </button>
+    {% endif %}
 </div>
 
+{% if can.activities_create %}
 <div class="modal fade" id="activityFormModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -42,131 +45,125 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <div class="activity-shell">
-    <form method="get" class="activity-toolbar activity-toolbar-compact">
-        <div class="activity-filter activity-filter-search">
-            <label class="form-label text-muted">Search</label>
-            <input type="text" class="form-control" name="q" value="{{ query }}" placeholder="Search" aria-label="Search activities">
+    <form method="get" class="row g-2 align-items-end mb-2">
+        <div class="col-md-9">
+            <label class="form-label text-muted">Search Customers</label>
+            <input type="text" class="form-control" name="q" value="{{ query }}" placeholder="Search by customer name or phone" aria-label="Search customers">
         </div>
-        <div class="activity-filter activity-filter-type">
-            <label class="form-label text-muted">Type</label>
-            <select class="form-select" name="activity_type_id" aria-label="Filter by type">
-                <option value="">All</option>
-                {% for type_id, type_name in activity_type_lookup.items %}
-                <option value="{{ type_id }}" {% if activity_type_filter == type_id %}selected{% endif %}>{{ type_name }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="activity-filter activity-filter-direction">
-            <label class="form-label text-muted">Direction</label>
-            <select class="form-select" name="direction" aria-label="Filter by direction">
-                <option value="">All</option>
-                {% for option in direction_options %}
-                <option value="{{ option }}" {% if direction_filter == option %}selected{% endif %}>{{ option }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="activity-filter activity-filter-status">
-            <label class="form-label text-muted">Status</label>
-            <select class="form-select" name="status" aria-label="Filter by status">
-                <option value="">All</option>
-                <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
-                <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
-            </select>
-        </div>
-        <div class="activity-filter activity-filter-user">
-            <label class="form-label text-muted">Assigned User</label>
-            <select class="form-select" name="assigned_user" aria-label="Filter by assigned user">
-                <option value="">All</option>
-                {% for user_id, user_name in assigned_user_options.items %}
-                <option value="{{ user_id }}" {% if assigned_user_filter == user_id %}selected{% endif %}>{{ user_name }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="activity-filter activity-date-col">
-            <label class="form-label text-muted">Date</label>
-            <input type="date" class="form-control" name="date" value="{{ date_filter }}" aria-label="Filter by date">
-        </div>
-        <div class="activity-filter-actions">
-            <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-funnel me-2"></i>Apply Filters</button>
-            <a class="btn btn-secondary btn-sm" href="{% url 'activities' %}">Reset</a>
+        <div class="col-md-3 d-flex gap-2">
+            <button class="btn btn-primary w-100" type="submit"><i class="bi bi-search me-2"></i>Search</button>
+            <a class="btn btn-secondary" href="{% url 'activities' %}">Reset</a>
         </div>
     </form>
 
-    <div class="row g-2 mt-0">
-        <div class="col-12">
-            <div class="activity-panel d-block">
-                <div class="activity-timeline">
-                    {% for item in activity_list %}
-                    {% with activity=item.row details=item.details %}
-                    <article class="timeline-card">
-                        <span class="timeline-rail-dot"></span>
-                        <div class="timeline-icon"><i class="bi bi-activity"></i></div>
-                        <div class="timeline-content">
-                            <div class="timeline-top">
-                                <div>
-                                    <h5>{{ details.activity_type }}</h5>
-                                    <div class="timeline-meta-compact">Assigned: {{ details.assigned_user }} <span class="timeline-meta-separator">&bull;</span> {{ details.date }}</div>
-                                </div>
+    <div class="crm-contact-activity-list">
+        {% for group in activity_groups %}
+        <article class="crm-contact-activity-card" role="button" tabindex="0" data-bs-toggle="modal" data-bs-target="#contactActivityModal{{ forloop.counter }}">
+            <div class="crm-contact-activity-main">
+                <h5 class="mb-0">{{ group.customer_name }}</h5>
+                {% if group.phone and group.phone != '-' %}
+                <div class="crm-contact-activity-meta">{{ group.phone }}</div>
+                {% endif %}
+                <div class="crm-contact-activity-meta">Last activity: {{ group.last_activity_type }}</div>
+                <div class="crm-contact-activity-meta">{{ group.last_activity_date }}</div>
+            </div>
+            <div class="crm-contact-activity-stats">
+                <div class="crm-contact-activity-meta">{{ group.activity_count }} Activities</div>
+                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#contactActivityModal{{ forloop.counter }}">Open</button>
+            </div>
+        </article>
+
+        <div class="modal fade" id="contactActivityModal{{ forloop.counter }}" tabindex="-1" aria-labelledby="contactActivityModalLabel{{ forloop.counter }}" aria-hidden="true">
+            <div class="modal-dialog modal-xl modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header modal-header-crm modal-header-master">
+                        <div class="d-flex align-items-start justify-content-between w-100 gap-2">
+                            <div>
+                                <h5 class="modal-title modal-title-crm" id="contactActivityModalLabel{{ forloop.counter }}">{{ group.customer_name }}</h5>
+                                <div class="modal-role">{{ group.activity_count }} activities • Latest {{ group.last_activity_date }}</div>
                             </div>
-                            <p class="timeline-description">{{ details.description }}</p>
-                            <div class="timeline-foot">
-                                <div class="timeline-badges">
-                                    <span class="crm-badge bg-primary-subtle text-primary">{{ details.direction }}</span>
-                                    <span class="crm-badge bg-success-subtle text-success">{{ details.status }}</span>
-                                </div>
-                                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#activityModal{{ activity.id }}">
-                                    <i class="bi bi-eye me-1"></i>View
-                                </button>
+                            <div class="d-flex flex-column align-items-end gap-2 text-end">
+                                <span class="crm-badge bg-primary-subtle text-primary">{{ group.assigned_user }}</span>
                             </div>
                         </div>
-                    </article>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body modal-body-crm p-2 p-md-2">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                            <div class="crm-field-label mb-0">Activity Type Filter</div>
+                            <select class="form-select form-select-sm crm-timeline-filter" data-timeline-target="#timeline{{ forloop.counter }}" style="max-width: 220px;">
+                                <option value="">All activity types</option>
+                                {% for type_name in group.type_options %}
+                                <option value="{{ type_name|lower }}">{{ type_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
 
-                    <div class="modal fade" id="activityModal{{ activity.id }}" tabindex="-1" aria-labelledby="activityModalLabel{{ activity.id }}" aria-hidden="true">
-                        <div class="modal-dialog modal-xl modal-dialog-centered">
-                            <div class="modal-content">
-                                <div class="modal-header modal-header-crm">
-                                    <div class="d-flex align-items-start justify-content-between w-100 gap-2">
-                                        <div>
-                                            <h5 class="modal-title modal-title-crm" id="activityModalLabel{{ activity.id }}">{{ details.activity_type }}</h5>
-                                            <div class="modal-role">{{ details.contact_name }}</div>
-                                        </div>
-                                        <div class="d-flex flex-column align-items-end gap-2 text-end">
-                                            <span class="crm-badge bg-primary-subtle text-primary">{{ details.direction }}</span>
-                                            <div class="modal-meta">{{ details.date }}</div>
-                                        </div>
+                        <div class="crm-master-timeline" id="timeline{{ forloop.counter }}">
+                            {% for activity in group.timeline %}
+                            <article class="crm-master-item" data-activity-type="{{ activity.activity_type|lower }}">
+                                <div class="crm-master-icon"><i class="bi {{ activity.icon }}"></i></div>
+                                <div class="crm-master-main">
+                                    <div class="crm-master-top">
+                                        <strong>{{ activity.activity_type }}</strong>
+                                        <span class="crm-master-meta">{{ activity.date }}</span>
                                     </div>
-                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                                </div>
-                                <div class="modal-body modal-body-crm p-2 p-md-2">
-                                    <div class="card border-0 crm-panel-card">
-                                        <div class="card-body p-2 p-md-2">
-                                            <div class="row g-2 align-items-stretch">
-                                                <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Activity Type</div><div class="crm-field-value">{{ details.activity_type }}</div></div></div>
-                                                <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Contact</div><div class="crm-field-value">{{ details.contact_name }}</div></div></div>
-                                                <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Direction</div><div class="crm-field-value">{{ details.direction }}</div></div></div>
-                                                <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Status</div><div class="crm-field-value">{{ details.status }}</div></div></div>
-                                                <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Assigned User</div><div class="crm-field-value">{{ details.assigned_user }}</div></div></div>
-                                                <div class="col-12 col-md-6"><div class="crm-field"><div class="crm-field-label">Date</div><div class="crm-field-value">{{ details.date }}</div></div></div>
-                                                <div class="col-12"><div class="crm-field"><div class="crm-field-label">Description</div><div class="crm-field-value">{{ details.description }}</div></div></div>
-                                                <div class="col-12"><div class="crm-field"><div class="crm-field-label">Outcome</div><div class="crm-field-value">{{ details.outcome }}</div></div></div>
-                                            </div>
-                                        </div>
+                                    <div class="crm-master-meta">Assigned: {{ activity.assigned_user }}</div>
+                                    <div class="crm-master-flags">
+                                        <span class="crm-badge bg-success-subtle text-success">{{ activity.status }}</span>
+                                        <span class="crm-badge bg-primary-subtle text-primary">{{ activity.direction }}</span>
                                     </div>
+                                    <div class="crm-master-text">{{ activity.description }}</div>
+                                    <div class="crm-master-foot">Outcome: {{ activity.outcome }}</div>
                                 </div>
-                            </div>
+                            </article>
+                            {% endfor %}
                         </div>
                     </div>
-                    {% endwith %}
-                    {% empty %}
-                    <div class="empty-state">No activities found for this selection.</div>
-                    {% endfor %}
                 </div>
-
-                {% include 'includes/compact_pagination.html' with aria_label='Activities pagination' item_label='Activities' %}
             </div>
         </div>
+        {% empty %}
+        <div class="empty-state">No activities found for this selection.</div>
+        {% endfor %}
     </div>
+
+    {% include 'includes/compact_pagination.html' with aria_label='Activities pagination' item_label='Contacts' %}
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ block.super }}
+<script>
+document.addEventListener('keydown', function (event) {
+    const card = event.target.closest('.crm-contact-activity-card');
+    if (!card) {
+        return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        card.click();
+    }
+});
+
+document.addEventListener('change', function (event) {
+    if (!event.target.classList.contains('crm-timeline-filter')) {
+        return;
+    }
+    const filterValue = (event.target.value || '').toLowerCase();
+    const targetSelector = event.target.getAttribute('data-timeline-target');
+    const timeline = document.querySelector(targetSelector);
+    if (!timeline) {
+        return;
+    }
+    const items = timeline.querySelectorAll('[data-activity-type]');
+    items.forEach(function (item) {
+        const itemType = (item.getAttribute('data-activity-type') || '').toLowerCase();
+        item.style.display = !filterValue || itemType === filterValue ? '' : 'none';
+    });
+});
+</script>
 {% endblock %}

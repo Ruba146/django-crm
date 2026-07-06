@@ -11,11 +11,14 @@
         <p class="text-muted mb-1">Support</p>
         <h2 class="page-title mb-0">Tickets</h2>
     </div>
+    {% if can.tickets_create %}
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#ticketFormModal">
         <i class="bi bi-plus-lg me-2"></i>New Ticket
     </button>
+    {% endif %}
 </div>
 
+{% if can.tickets_create %}
 <div class="modal fade" id="ticketFormModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -42,6 +45,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <div class="card list-card">
     <div class="card-body">

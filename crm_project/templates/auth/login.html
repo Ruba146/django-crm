@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | Northstar CRM</title>
+    {% load static %}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+</head>
+<body class="auth-body">
+<div class="auth-shell">
+    <div class="auth-card card">
+        <div class="card-body p-4">
+            <div class="text-center mb-3">
+                <div class="brand-mark mx-auto mb-2"><i class="bi bi-stars"></i></div>
+                <h1 class="h5 mb-1">Northstar CRM</h1>
+                <p class="text-muted mb-0">Sign in to continue</p>
+            </div>
+
+            {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-success py-2">{{ message }}</div>
+            {% endfor %}
+            {% endif %}
+
+            <div id="login-panel" {% if active_form == 'register' %}class="d-none"{% endif %}>
+                <form method="post" novalidate>
+                    {% csrf_token %}
+                    <input type="hidden" name="form_type" value="login">
+                    {% if login_form.non_field_errors %}
+                    <div class="alert alert-danger py-2">{{ login_form.non_field_errors|striptags }}</div>
+                    {% endif %}
+                    <div class="mb-2">
+                        <label class="form-label">Username</label>
+                        <input type="text" name="username" class="form-control" value="{{ login_form.username.value|default:'' }}" required autofocus>
+                        {% for error in login_form.username.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input type="password" name="password" class="form-control" required>
+                        {% for error in login_form.password.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+                    <button class="btn btn-primary w-100" type="submit">Login</button>
+                </form>
+                <div class="text-center mt-3">
+                    <a href="{% url 'password_reset' %}" class="small text-decoration-none">Forgot password?</a>
+                </div>
+                <div class="text-center mt-2 small">
+                    Don't have an account? <a href="#" id="show-register" class="text-decoration-none">Create one</a>
+                </div>
+            </div>
+
+            <div id="register-panel" {% if active_form != 'register' %}class="d-none"{% endif %}>
+                <form method="post" novalidate>
+                    {% csrf_token %}
+                    <input type="hidden" name="form_type" value="register">
+                    {% if register_form.non_field_errors %}
+                    <div class="alert alert-danger py-2">{{ register_form.non_field_errors|striptags }}</div>
+                    {% endif %}
+                    <div class="mb-2">
+                        <label class="form-label">Username</label>
+                        <input type="text" name="username" class="form-control" value="{{ register_form.username.value|default:'' }}" required>
+                        {% for error in register_form.username.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Email</label>
+                        <input type="email" name="email" class="form-control" value="{{ register_form.email.value|default:'' }}" required>
+                        {% for error in register_form.email.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Password</label>
+                        <input type="password" name="password1" class="form-control" required>
+                        {% for error in register_form.password1.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Confirm Password</label>
+                        <input type="password" name="password2" class="form-control" required>
+                        {% for error in register_form.password2.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+                    <button class="btn btn-primary w-100" type="submit">Create Account</button>
+                </form>
+                <div class="text-center mt-2 small">
+                    Already have an account? <a href="#" id="show-login" class="text-decoration-none">Login</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    const loginPanel = document.getElementById('login-panel');
+    const registerPanel = document.getElementById('register-panel');
+    const showRegister = document.getElementById('show-register');
+    const showLogin = document.getElementById('show-login');
+
+    function show(mode) {
+        const isRegister = mode === 'register';
+        loginPanel.classList.toggle('d-none', isRegister);
+        registerPanel.classList.toggle('d-none', !isRegister);
+        history.replaceState(null, '', isRegister ? '#register' : '#login');
+    }
+
+    showRegister?.addEventListener('click', function (event) {
+        event.preventDefault();
+        show('register');
+    });
+
+    showLogin?.addEventListener('click', function (event) {
+        event.preventDefault();
+        show('login');
+    });
+
+    if (window.location.hash === '#register') {
+        show('register');
+    }
+})();
+</script>
+</body>
+</html>
