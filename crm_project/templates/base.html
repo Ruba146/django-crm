@@ -35,6 +35,8 @@
                 {% if 'activities' in allowed_sections %}<li><a class="nav-link" href="{% url 'activities' %}"><i class="bi bi-activity"></i><span>Activities</span></a></li>{% endif %}
                 {% if 'tasks' in allowed_sections %}<li><a class="nav-link" href="{% url 'tasks' %}"><i class="bi bi-list-check"></i><span>Tasks</span></a></li>{% endif %}
                 {% if 'tickets' in allowed_sections %}<li><a class="nav-link" href="{% url 'tickets' %}"><i class="bi bi-ticket-detailed"></i><span>Tickets</span></a></li>{% endif %}
+                {% if 'analytics' in allowed_sections %}<li><a class="nav-link" href="{% url 'analytics' %}"><i class="bi bi-bar-chart-line"></i><span>Analytics</span></a></li>{% endif %}
+                {% if 'lead_scoring' in allowed_sections %}<li><a class="nav-link" href="{% url 'lead_scoring' %}"><i class="bi bi-stars"></i><span>Lead Scoring</span></a></li>{% endif %}
                 {% if can.is_system_admin %}<li><a class="nav-link" href="{% url 'users' %}"><i class="bi bi-people-fill"></i><span>Users</span></a></li>{% endif %}
             </ul>
         </div>

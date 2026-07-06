@@ -1,0 +1,261 @@
+{% extends 'base.html' %}
+
+{% block title %}Lead Scoring | Northstar CRM{% endblock %}
+{% block page_title %}Lead Scoring{% endblock %}
+{% block page_breadcrumb %}Workspace / Lead Scoring{% endblock %}
+{% block page_subtitle %}AI-powered lead qualification{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<div class="ls-page">
+    <!-- Teal header banner -->
+    <div class="ls-banner">
+        <div class="ls-banner-icon"><i class="bi bi-stars"></i></div>
+        <div>
+            <h2 class="ls-banner-title">Lead Scoring</h2>
+            <p class="ls-banner-sub">AI-powered lead qualification — predict whether a lead is worth your team's time.</p>
+        </div>
+    </div>
+
+    <!-- Form card -->
+    <div class="ls-card">
+        <div class="ls-card-head">
+            <h3 class="ls-card-title">Lead Details</h3>
+            <p class="ls-card-subtitle">Fill in what you know about this lead</p>
+        </div>
+
+        <form id="lsForm" autocomplete="off">
+            <!-- Source -->
+            <div class="ls-field">
+                <label class="ls-field-label" for="lsSource">Lead Source 📍</label>
+                <select id="lsSource" class="ls-select">
+                    <option value="Instagram" selected>Instagram</option>
+                    <option value="Website">Website</option>
+                    <option value="Snapchat">Snapchat</option>
+                    <option value="Employee Referral">Employee Referral</option>
+                    <option value="TikTok">TikTok</option>
+                    <option value="Partner Referral">Partner Referral</option>
+                </select>
+            </div>
+
+            <!-- Paid campaign -->
+            <div class="ls-toggle-row">
+                <div class="ls-toggle-text">
+                    <div class="ls-toggle-label">Paid Campaign? 💰</div>
+                    <div class="ls-toggle-sub">Lead came from a paid advertisement</div>
+                </div>
+                <input type="checkbox" class="toggle" id="lsCampaign">
+                <label class="toggle-label" for="lsCampaign"></label>
+            </div>
+
+            <!-- Quiz answers -->
+            <div class="ls-toggle-row">
+                <div class="ls-toggle-text">
+                    <div class="ls-toggle-label">Answered Intake Questions? 📋</div>
+                    <div class="ls-toggle-sub">Lead filled out the qualification form</div>
+                </div>
+                <input type="checkbox" class="toggle" id="lsQuiz">
+                <label class="toggle-label" for="lsQuiz"></label>
+            </div>
+
+            <!-- Company match -->
+            <div class="ls-toggle-row">
+                <div class="ls-toggle-text">
+                    <div class="ls-toggle-label">Matched Existing Company? 🏢</div>
+                    <div class="ls-toggle-sub">Lead was matched to a known record at intake</div>
+                </div>
+                <input type="checkbox" class="toggle" id="lsMatch">
+                <label class="toggle-label" for="lsMatch"></label>
+            </div>
+
+            <button type="submit" class="ls-btn" id="lsAnalyzeBtn">
+                <span class="ls-btn-text">Analyze Lead →</span>
+                <span class="ls-btn-spinner" hidden><span class="spinner-border spinner-border-sm"></span> Analyzing…</span>
+            </button>
+        </form>
+    </div>
+
+    <!-- Result card -->
+    <div id="lsResult" class="ls-result" hidden></div>
+</div>
+
+<style>
+    .ls-page { padding-bottom: 24px; }
+
+    .ls-banner {
+        display: flex; align-items: center; gap: 16px;
+        background: linear-gradient(135deg, #3730a3, #4f46e5);
+        color: #fff; border-radius: 16px; padding: 22px 26px; margin-bottom: 22px;
+        box-shadow: 0 8px 24px rgba(79,70,229,.22);
+    }
+    .ls-banner-icon { font-size: 2rem; opacity: .95; }
+    .ls-banner-title { margin: 0; font-weight: 800; font-size: 1.5rem; }
+    .ls-banner-sub { margin: 4px 0 0; opacity: .9; font-size: .9rem; }
+
+    .ls-card {
+        background: #fff; max-width: 620px; margin: 0 auto; border-radius: 18px;
+        padding: 34px 34px 30px; box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        border: 1px solid #e5e7eb;
+    }
+    .ls-card-head { margin-bottom: 18px; }
+    .ls-card-title { margin: 0; font-weight: 800; font-size: 1.3rem; color: #0f172a; }
+    .ls-card-subtitle { margin: 4px 0 0; color: #6b7280; font-size: .88rem; }
+
+    .ls-field { margin-bottom: 18px; }
+    .ls-field-label { display: block; font-weight: 600; color: #334155; margin-bottom: 8px; font-size: .92rem; }
+    .ls-select {
+        width: 100%; height: 46px; padding: 0 14px; border-radius: 10px;
+        border: 1px solid #d7dbe2; background: #fff; font-size: .95rem; color: #0f172a;
+        transition: border-color .2s, box-shadow .2s; appearance: auto;
+    }
+    .ls-select:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.15); }
+
+    .ls-toggle-row {
+        display: flex; align-items: center; gap: 14px;
+        padding: 16px 0; border-bottom: 1px solid #eef0f4;
+    }
+    .ls-toggle-text { flex: 1; }
+    .ls-toggle-label { font-weight: 600; color: #0f172a; font-size: .95rem; }
+    .ls-toggle-sub { color: #6b7280; font-size: .8rem; margin-top: 2px; }
+
+    /* iOS-style toggle (pure CSS) */
+    input[type=checkbox].toggle { display: none; }
+    .toggle-label {
+        width: 48px; height: 26px; background: #ccc; border-radius: 13px; cursor: pointer;
+        position: relative; transition: background 0.3s; flex-shrink: 0; display: inline-block;
+    }
+    .toggle-label::after {
+        content: ''; position: absolute; width: 22px; height: 22px; background: white;
+        border-radius: 50%; top: 2px; left: 2px; transition: left 0.3s; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+    }
+    input[type=checkbox].toggle:checked + .toggle-label { background: #4f46e5; }
+    input[type=checkbox].toggle:checked + .toggle-label::after { left: 24px; }
+
+    .ls-btn {
+        width: 100%; height: 48px; margin-top: 22px; border: none; border-radius: 12px;
+        background: #4f46e5; color: #fff; font-weight: 700; font-size: 1rem; cursor: pointer;
+        transition: background .2s, transform .05s;
+    }
+    .ls-btn:hover { background: #6366f1; }
+    .ls-btn:active { transform: translateY(1px); }
+    .ls-btn:disabled { opacity: .8; cursor: default; }
+
+    /* Result card */
+    .ls-result {
+        max-width: 620px; margin: 18px auto 0; border-radius: 18px; padding: 32px;
+        color: #fff; text-align: center; animation: lsFadeIn .5s ease;
+        box-shadow: 0 14px 34px rgba(15,23,42,.18);
+    }
+    @keyframes lsFadeIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    .ls-result-emoji { font-size: 5rem; line-height: 1; }
+    .ls-result-title { font-size: 2rem; font-weight: 800; margin: 8px 0 12px; }
+    .ls-result-badge {
+        display: inline-block; padding: 5px 16px; border-radius: 999px; font-weight: 700;
+        font-size: .8rem; letter-spacing: .5px; border: 2px solid rgba(255,255,255,.7); color: #fff;
+    }
+    .ls-progress-wrap { margin: 22px 0 4px; text-align: left; }
+    .ls-progress-head { display: flex; justify-content: space-between; font-size: .9rem; font-weight: 600; margin-bottom: 8px; }
+    .ls-progress-track { height: 12px; background: rgba(255,255,255,.22); border-radius: 999px; overflow: hidden; }
+    .ls-progress-fill { height: 100%; border-radius: 999px; width: 0; transition: width .6s ease; }
+    .ls-divider { border: 0; border-top: 1px solid rgba(255,255,255,.25); margin: 22px 0; }
+    .ls-reco {
+        display: flex; gap: 12px; align-items: flex-start; text-align: left;
+        background: rgba(0,0,0,.22); border-radius: 12px; padding: 16px;
+    }
+    .ls-reco-icon { font-size: 1.5rem; line-height: 1.2; }
+    .ls-reco-text { font-size: .92rem; line-height: 1.5; }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    (function () {
+        const form = document.getElementById('lsForm');
+        const btn = document.getElementById('lsAnalyzeBtn');
+        const btnText = btn.querySelector('.ls-btn-text');
+        const btnSpinner = btn.querySelector('.ls-btn-spinner');
+        const resultEl = document.getElementById('lsResult');
+
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+        function setLoading(on) {
+            btn.disabled = on;
+            btnText.hidden = on;
+            btnSpinner.hidden = !on;
+        }
+
+        function renderResult(res) {
+            const isJunk = res.is_junk;
+            const pct = Math.round((isJunk ? res.p_junk : res.p_clean) * 100);
+            const bg = isJunk
+                ? 'linear-gradient(135deg, #7f1d1d, #991b1b)'
+                : 'linear-gradient(135deg, #064e3b, #065f46)';
+            const emoji = isJunk ? '🚫' : '✅';
+            const title = isJunk ? 'Likely Not a Fit' : 'Promising Genuine Lead';
+            const badge = isJunk ? 'JUNK LEAD' : 'CLEAN LEAD';
+            const barColor = isJunk ? '#ef4444' : '#22c55e';
+            const barLabel = isJunk ? 'Risk Level' : 'Confidence Level';
+            const recoIcon = isJunk ? '⚠️' : '🚀';
+            const recoText = isJunk
+                ? "We recommend not spending sales team time on this lead. The request can be closed automatically."
+                : "This lead is worth immediate follow-up. Assign to a sales rep and begin outreach as soon as possible.";
+
+            resultEl.style.background = bg;
+            resultEl.innerHTML =
+                '<div class="ls-result-emoji">' + emoji + '</div>' +
+                '<div class="ls-result-title">' + title + '</div>' +
+                '<span class="ls-result-badge">' + badge + '</span>' +
+                '<div class="ls-progress-wrap">' +
+                    '<div class="ls-progress-head"><span>' + barLabel + '</span><span>' + pct + '%</span></div>' +
+                    '<div class="ls-progress-track"><div class="ls-progress-fill" style="background:' + barColor + ';"></div></div>' +
+                '</div>' +
+                '<hr class="ls-divider">' +
+                '<div class="ls-reco">' +
+                    '<div class="ls-reco-icon">' + recoIcon + '</div>' +
+                    '<div class="ls-reco-text">' + recoText + '</div>' +
+                '</div>';
+
+            resultEl.hidden = false;
+            // restart fade animation + animate the bar width
+            resultEl.style.animation = 'none';
+            void resultEl.offsetWidth;
+            resultEl.style.animation = '';
+            requestAnimationFrame(() => {
+                const fill = resultEl.querySelector('.ls-progress-fill');
+                if (fill) { fill.style.width = pct + '%'; }
+            });
+            resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            setLoading(true);
+            const payload = {
+                source: document.getElementById('lsSource').value,
+                has_campaign: document.getElementById('lsCampaign').checked,
+                has_quiz_answers: document.getElementById('lsQuiz').checked,
+                matched_at_intake: document.getElementById('lsMatch').checked
+            };
+            fetch('{% url "predict_lead" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify(payload)
+            })
+                .then(r => {
+                    if (!r.ok) { throw new Error('Request failed: ' + r.status); }
+                    return r.json();
+                })
+                .then(renderResult)
+                .catch(err => {
+                    resultEl.hidden = false;
+                    resultEl.style.background = 'linear-gradient(135deg,#374151,#4b5563)';
+                    resultEl.innerHTML = '<div class="ls-reco-text">Something went wrong: ' + err.message + '</div>';
+                })
+                .finally(() => setLoading(false));
+        });
+    })();
+</script>
+{% endblock %}

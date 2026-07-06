@@ -15,7 +15,7 @@ from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.contrib.auth.password_validation import validate_password
 from django import forms
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction, IntegrityError
 from django.http import JsonResponse, HttpResponseForbidden
 from django.core.paginator import Paginator
 from django.shortcuts import redirect, render
@@ -2180,6 +2180,102 @@ def profile(request):
     return render(request, "auth/profile.html")
 
 
+def analytics_dashboard(request):
+    import json
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE deleted_at IS NULL")
+    kpi_total = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE junk_reason_id IS NULL AND deleted_at IS NULL")
+    kpi_clean = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE junk_reason_id IS NOT NULL AND deleted_at IS NULL")
+    kpi_junk = cursor.fetchone()[0]
+
+    cursor.execute("""SELECT s.label, COUNT(l.id) as count
+        FROM leads l JOIN sources s ON l.primary_source_id = s.id
+        WHERE l.deleted_at IS NULL GROUP BY s.label ORDER BY count DESC""")
+    leads_by_source = [{"source": r[0], "count": r[1]} for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT s.label,
+        SUM(CASE WHEN l.junk_reason_id IS NOT NULL THEN 1 ELSE 0 END) as junk,
+        SUM(CASE WHEN l.junk_reason_id IS NULL THEN 1 ELSE 0 END) as clean
+        FROM leads l JOIN sources s ON l.primary_source_id = s.id
+        WHERE l.deleted_at IS NULL GROUP BY s.label""")
+    junk_by_source = [{"source": r[0], "junk": r[1], "clean": r[2]} for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT u.name, COUNT(d.id),
+        SUM(CASE WHEN ps.terminal_type='won' THEN 1 ELSE 0 END),
+        SUM(CASE WHEN ps.terminal_type='lost' THEN 1 ELSE 0 END),
+        ROUND(100.0*SUM(CASE WHEN ps.terminal_type='won' THEN 1 ELSE 0 END)/COUNT(d.id),1),
+        ROUND(SUM(CASE WHEN ps.terminal_type='won' THEN d.won_value_minor ELSE 0 END)/100.0,0)
+        FROM deals d JOIN users u ON d.owner_id=u.id
+        JOIN pipeline_stages ps ON d.stage_id=ps.id
+        WHERE d.deleted_at IS NULL GROUP BY u.name ORDER BY 2 DESC""")
+    rep_performance = [{"rep": r[0], "deals": r[1], "won": r[2], "lost": r[3], "win_rate": r[4], "revenue": r[5]} for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT lr.label, COUNT(d.id),
+        ROUND(SUM(COALESCE(d.expected_value_minor,0))/100.0,0)
+        FROM deals d JOIN lost_reasons lr ON d.lost_reason_id=lr.id
+        WHERE d.lost_reason_id IS NOT NULL GROUP BY lr.label ORDER BY 2 DESC""")
+    lost_reasons = [{"reason": r[0], "count": r[1], "value_sar": r[2]} for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT s.label,
+        ROUND(AVG((julianday(a.occurred_at)-julianday(l.created_at))*24),1)
+        FROM activities a JOIN leads l ON a.entity_id=l.id AND a.entity_type='lead'
+        JOIN sources s ON l.primary_source_id=s.id
+        WHERE a.occurred_at>l.created_at AND l.deleted_at IS NULL
+        GROUP BY s.label ORDER BY 2 ASC""")
+    response_time = [{"source": r[0], "hours": r[1]} for r in cursor.fetchall()]
+
+    conn.close()
+    return render(request, "analytics.html", {
+        "kpi_total": kpi_total,
+        "kpi_clean": kpi_clean,
+        "kpi_junk": kpi_junk,
+        "leads_by_source_json": json.dumps(leads_by_source),
+        "junk_by_source_json": json.dumps(junk_by_source),
+        "rep_performance_json": json.dumps(rep_performance),
+        "lost_reasons_json": json.dumps(lost_reasons),
+        "response_time_json": json.dumps(response_time),
+    })
+
+
+def lead_scoring(request):
+    return render(request, "lead_scoring.html", {})
+
+
+def predict_lead(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+    data = json.loads(request.body)
+    source = data.get("source", "Instagram")
+    has_campaign = bool(data.get("has_campaign", False))
+    has_quiz_answers = bool(data.get("has_quiz_answers", False))
+    matched_at_intake = bool(data.get("matched_at_intake", False))
+    source_junk_rates = {
+        "Instagram": 0.805,
+        "Website": 0.750,
+        "TikTok": 0.667,
+        "Snapchat": 0.388,
+        "Partner Referral": 0.000,
+        "Employee Referral": 0.000,
+    }
+    base = source_junk_rates.get(source, 0.5)
+    if matched_at_intake:
+        base *= 0.2
+    if has_campaign:
+        base *= 0.9
+    if has_quiz_answers:
+        base *= 0.85
+    p_junk = round(min(base, 1.0), 3)
+    p_clean = round(1.0 - p_junk, 3)
+    is_junk = p_junk >= 0.5
+    return JsonResponse({"is_junk": is_junk, "p_junk": p_junk, "p_clean": p_clean})
+
+
 def auth_portal(request):
     if request.user.is_authenticated:
         return redirect("dashboard")
@@ -2204,28 +2300,44 @@ def auth_portal(request):
             return redirect("dashboard")
         if form_type == "register" and register_form.is_valid():
             _ensure_custom_permissions_and_groups()
-            user = register_form.save()
-            user.first_name = (request.POST.get("first_name") or "").strip()
-            user.last_name = (request.POST.get("last_name") or "").strip()
-            user.save()
-
-            has_system_admin = User.objects.filter(groups__name=SYSTEM_ADMIN_ROLE).exists() or User.objects.filter(is_superuser=True).exists()
-            if not has_system_admin:
-                _assign_role(user, SYSTEM_ADMIN_ROLE)
+            try:
+                with transaction.atomic():
+                    user = register_form.save()
+                    user.first_name = (request.POST.get("first_name") or "").strip()
+                    user.last_name = (request.POST.get("last_name") or "").strip()
+                    user.save()
+            except IntegrityError:
+                # A concurrent registration (e.g. a double-submit) can create a
+                # user with this username after the form's uniqueness check but
+                # before this insert, tripping the auth_user.username UNIQUE
+                # constraint. Surface it as a form error instead of a 500.
+                register_form.add_error("username", "A user with that username already exists.")
             else:
-                _assign_role(user, "Viewer")
+                # Every new user automatically gets analytics + lead scoring view access.
+                try:
+                    for codename in ['analytics_view', 'lead_scoring_view']:
+                        perm = Permission.objects.get(codename=codename)
+                        user.user_permissions.add(perm)
+                except Exception:
+                    pass
 
-            authenticated_user = authenticate(
-                request,
-                username=user.username,
-                password=register_form.cleaned_data["password1"],
-            )
-            if authenticated_user is not None:
-                login(request, authenticated_user)
-                return redirect("dashboard")
-            register_success = True
-            messages.success(request, "Account created. Please sign in.")
-            active_form = "login"
+                has_system_admin = User.objects.filter(groups__name=SYSTEM_ADMIN_ROLE).exists() or User.objects.filter(is_superuser=True).exists()
+                if not has_system_admin:
+                    _assign_role(user, SYSTEM_ADMIN_ROLE)
+                else:
+                    _assign_role(user, "Viewer")
+
+                authenticated_user = authenticate(
+                    request,
+                    username=user.username,
+                    password=register_form.cleaned_data["password1"],
+                )
+                if authenticated_user is not None:
+                    login(request, authenticated_user)
+                    return redirect("dashboard")
+                register_success = True
+                messages.success(request, "Account created. Please sign in.")
+                active_form = "login"
 
     return render(request, "auth/login.html", {
         "login_form": login_form,

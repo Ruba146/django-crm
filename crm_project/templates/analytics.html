@@ -1,0 +1,405 @@
+{% extends 'base.html' %}
+
+{% block title %}Analytics | Northstar CRM{% endblock %}
+{% block page_title %}Analytics{% endblock %}
+{% block page_breadcrumb %}Workspace / Analytics{% endblock %}
+{% block page_subtitle %}Real-time insights from your CRM data{% endblock %}
+
+{% block content %}
+<div class="an-page">
+    <!-- SECTION 1 — KPI cards -->
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-md-3">
+            <section class="dash-card an-kpi text-center">
+                <div class="an-kpi-icon" style="color:#0f172a;"><i class="bi bi-people-fill"></i></div>
+                <div class="an-kpi-value" style="color:#0f172a;">{{ kpi_total }}</div>
+                <div class="an-kpi-label">Total Leads</div>
+            </section>
+        </div>
+        <div class="col-6 col-md-3">
+            <section class="dash-card an-kpi text-center" style="background:#f0fdf4;">
+                <div class="an-kpi-icon" style="color:#059669;"><i class="bi bi-check-circle-fill"></i></div>
+                <div class="an-kpi-value" style="color:#059669;">{{ kpi_clean }}</div>
+                <div class="an-kpi-label">Clean Leads</div>
+            </section>
+        </div>
+        <div class="col-6 col-md-3">
+            <section class="dash-card an-kpi text-center" style="background:#fef2f2;">
+                <div class="an-kpi-icon" style="color:#dc2626;"><i class="bi bi-x-circle-fill"></i></div>
+                <div class="an-kpi-value" style="color:#dc2626;">{{ kpi_junk }}</div>
+                <div class="an-kpi-label">Junk Leads</div>
+            </section>
+        </div>
+        <div class="col-6 col-md-3">
+            <section class="dash-card an-kpi text-center" style="background:#fffbeb;">
+                <div class="an-kpi-icon" style="color:#f59e0b;"><i class="bi bi-star-fill"></i></div>
+                <div class="an-kpi-value" style="color:#f59e0b;">126</div>
+                <div class="an-kpi-label">High Priority</div>
+            </section>
+        </div>
+    </div>
+
+    <!-- SECTION 2 -->
+    <div class="row g-4 mb-3">
+        <div class="col-12 col-xl-4">
+            <section class="dash-card an-panel an-panel-2 d-flex flex-column">
+                <div class="an-title">Leads by Source</div>
+                <div class="an-chart-wrap flex-grow-1"><canvas id="leadsBySourceChart"></canvas></div>
+            </section>
+        </div>
+        <div class="col-12 col-xl-4">
+            <section class="dash-card an-panel an-panel-2 d-flex flex-column">
+                <div class="an-title">Sales Rep Performance</div>
+                <div class="table-responsive flex-grow-1">
+                    <table class="table table-sm align-middle mb-0 an-rep-table">
+                        <thead>
+                            <tr>
+                                <th>Rep</th>
+                                <th class="text-center">Deals</th>
+                                <th class="text-center">Won</th>
+                                <th class="text-center">Lost</th>
+                                <th class="text-center">Win Rate</th>
+                                <th class="text-end">Revenue (SAR)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="repPerformanceBody"></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+        <div class="col-12 col-xl-4">
+            <section class="dash-card an-panel an-panel-2 d-flex flex-column">
+                <div class="an-title">Sales Funnel</div>
+                <div id="salesFunnel" class="an-funnel"></div>
+            </section>
+        </div>
+    </div>
+
+    <!-- SECTION 3 -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-xl-4">
+            <section class="dash-card an-panel d-flex flex-column">
+                <div class="an-title">Lead Quality by Source</div>
+                <div class="an-chart-wrap flex-grow-1"><canvas id="junkBySourceChart"></canvas></div>
+            </section>
+        </div>
+        <div class="col-12 col-xl-4">
+            <section class="dash-card an-panel d-flex flex-column">
+                <div class="an-title">Why We Lose Deals</div>
+                <div class="an-chart-wrap flex-grow-1"><canvas id="lostReasonsChart"></canvas></div>
+            </section>
+        </div>
+        <div class="col-12 col-xl-4">
+            <section class="dash-card an-panel d-flex flex-column">
+                <div class="an-title">Response Time (hours)</div>
+                <div class="an-chart-wrap flex-grow-1"><canvas id="responseTimeChart"></canvas></div>
+            </section>
+        </div>
+    </div>
+
+    <!-- SECTION 4 -->
+    <div class="row g-3">
+        <div class="col-12">
+            <section class="dash-card an-panel">
+                <div class="an-title">🏆 Source Ranking</div>
+                <div id="sourceRanking" class="an-ranking"></div>
+            </section>
+        </div>
+    </div>
+</div>
+
+<style>
+    .an-title {
+        font-weight: 700; font-size: 1rem; color: #0f172a;
+        padding-left: 10px; border-left: 3px solid #4f46e5;
+        margin-bottom: 14px; line-height: 1.2;
+    }
+    .an-panel { padding: 20px; }
+    .an-panel-2 { padding: 1.75rem; }
+    .an-kpi { padding: 22px 12px; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .an-kpi-icon { font-size: 1.6rem; margin-bottom: 6px; }
+    .an-kpi-value { font-size: 2.5rem; font-weight: 800; line-height: 1; letter-spacing: -1px; }
+    .an-kpi-label { font-size: .8rem; color: #6b7280; margin-top: 6px; font-weight: 500; }
+    .an-chart-wrap { position: relative; min-height: 300px; }
+
+    /* Rep table: win-rate colors + subtle alternating overlay */
+    .an-rep-table { font-size: .82rem; }
+    .an-rep-table th, .an-rep-table td { padding: 0.6rem 0.8rem; }
+    .an-rep-table thead th { color: #6b7280; font-weight: 600; border-bottom: 1px solid #e5e7eb; }
+    .an-rep-table tbody tr:nth-child(even) { box-shadow: inset 0 0 0 999px rgba(0,0,0,.025); }
+    .an-rep-table .totals-row { font-weight: 800; border-top: 2px solid #334155; background: #f8fafc !important; box-shadow: none !important; }
+    .an-winrate-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-weight: 700; font-size: .74rem; }
+    .an-winrate-pill.good { background: #059669; color: #fff; }
+    .an-winrate-pill.mid  { background: #f59e0b; color: #fff; }
+    .an-winrate-pill.bad  { background: #dc2626; color: #fff; }
+
+    /* Funnel */
+    .an-funnel { display: flex; flex-direction: column; justify-content: flex-start; width: 100%; }
+    .an-funnel .an-funnel-row { display: flex; flex-direction: column; width: 100%; margin-bottom: 10px; }
+    .an-funnel .an-funnel-name { font-size: .8rem; font-weight: 700; color: #334155; margin-bottom: 4px; }
+    .an-funnel .an-funnel-track { display: flex; align-items: center; gap: 10px; width: 100%; }
+    .an-funnel .an-funnel-bar {
+        height: 44px; min-width: 80px; border-radius: 8px; padding: 0 12px;
+        display: flex; align-items: center; justify-content: space-between;
+        color: #fff; font-size: .85rem; font-weight: 600; white-space: nowrap;
+        box-shadow: 0 1px 2px rgba(0,0,0,.12); overflow: visible; flex-shrink: 0;
+    }
+    .an-funnel .an-funnel-bar .an-funnel-meta { margin-left: auto; }
+    .an-funnel .an-funnel-outside { color: #374151; font-weight: 700; font-size: .85rem; white-space: nowrap; flex-shrink: 0; margin-left: 8px; background: none; border: none; box-shadow: none; }
+
+    /* Source ranking cards */
+    .an-ranking { display: flex; flex-wrap: wrap; gap: 12px; }
+    .an-rank-card {
+        flex: 1 1 160px; min-width: 150px; background: #fff; border: 1px solid #eef0f4;
+        border-top-width: 4px; border-radius: 12px; padding: 14px 16px;
+        box-shadow: 0 1px 3px rgba(15,23,42,.05);
+    }
+    .an-rank-card .an-rank-medal { font-size: 1.5rem; line-height: 1; }
+    .an-rank-card .an-rank-name { font-weight: 800; color: #0f172a; margin: 6px 0 8px; }
+    .an-rank-card .an-rank-stat { font-size: .78rem; color: #6b7280; }
+    .an-rank-card .an-rank-stat strong { color: #334155; }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+    (function () {
+        if (typeof Chart === 'undefined') { return; }
+
+        const leadsBySource = JSON.parse('{{ leads_by_source_json|escapejs }}');
+        const junkBySource = JSON.parse('{{ junk_by_source_json|escapejs }}');
+        const repPerformance = JSON.parse('{{ rep_performance_json|escapejs }}');
+        const lostReasons = JSON.parse('{{ lost_reasons_json|escapejs }}');
+        const responseTime = JSON.parse('{{ response_time_json|escapejs }}');
+
+        Chart.defaults.font.family = "'Inter', 'Cairo', system-ui, sans-serif";
+        Chart.defaults.color = '#6b7280';
+        const gridColor = 'rgba(148,163,184,.18)';
+        const fmt = n => Number(n || 0).toLocaleString('en-US');
+
+        // Panel: Leads by Source
+        (function () {
+            const el = document.getElementById('leadsBySourceChart');
+            if (!el || !leadsBySource.length) { return; }
+            new Chart(el, {
+                type: 'bar',
+                data: {
+                    labels: leadsBySource.map(r => r.source),
+                    datasets: [{ label: 'Leads', data: leadsBySource.map(r => r.count),
+                        backgroundColor: '#4f46e5', borderRadius: 6, maxBarThickness: 28 }]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: gridColor }, border: { display: false } },
+                        y: { grid: { display: false }, border: { display: false } }
+                    }
+                }
+            });
+        })();
+
+        // Panel: Lead Quality by Source (clustered)
+        (function () {
+            const el = document.getElementById('junkBySourceChart');
+            if (!el || !junkBySource.length) { return; }
+            new Chart(el, {
+                type: 'bar',
+                data: {
+                    labels: junkBySource.map(r => r.source),
+                    datasets: [
+                        { label: 'Junk', data: junkBySource.map(r => r.junk), backgroundColor: '#dc2626', borderRadius: 4, maxBarThickness: 22 },
+                        { label: 'Clean', data: junkBySource.map(r => r.clean), backgroundColor: '#059669', borderRadius: 4, maxBarThickness: 22 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } },
+                    scales: {
+                        x: { grid: { display: false }, border: { display: false } },
+                        y: { grid: { color: gridColor }, border: { display: false } }
+                    }
+                }
+            });
+        })();
+
+        // Panel: Why We Lose Deals
+        (function () {
+            const el = document.getElementById('lostReasonsChart');
+            if (!el || !lostReasons.length) { return; }
+            new Chart(el, {
+                type: 'bar',
+                data: {
+                    labels: lostReasons.map(r => r.reason),
+                    datasets: [{ label: 'Deals', data: lostReasons.map(r => r.count),
+                        backgroundColor: '#dc2626', borderRadius: 6, maxBarThickness: 28 }]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { afterLabel: ctx =>
+                            'Value: SAR ' + fmt(lostReasons[ctx.dataIndex].value_sar) } }
+                    },
+                    scales: {
+                        x: { grid: { color: gridColor }, border: { display: false } },
+                        y: { grid: { display: false }, border: { display: false } }
+                    }
+                }
+            });
+        })();
+
+        // Panel: Response Time (per-bar colors)
+        (function () {
+            const el = document.getElementById('responseTimeChart');
+            if (!el || !responseTime.length) { return; }
+            const rtColors = responseTime.map(function(d) {
+                if (d.hours < 50) return '#4f46e5';
+                if (d.hours <= 150) return '#f59e0b';
+                return '#dc2626';
+            });
+            new Chart(el, {
+                type: 'bar',
+                data: {
+                    labels: responseTime.map(function(r) { return r.source; }),
+                    datasets: [{ label: 'Hours', data: responseTime.map(function(r) { return r.hours; }),
+                        backgroundColor: rtColors, borderColor: rtColors, borderRadius: 6, maxBarThickness: 28 }]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: gridColor }, border: { display: false } },
+                        y: { grid: { display: false }, border: { display: false } }
+                    }
+                }
+            });
+        })();
+
+        // Panel: Sales Rep Performance table
+        (function () {
+            const body = document.getElementById('repPerformanceBody');
+            if (!body) { return; }
+            const rowBg = wr => wr > 20 ? '#dcfce7' : (wr >= 1 ? '#fef9c3' : '#fecaca');
+            const pillClass = wr => wr > 20 ? 'good' : (wr >= 1 ? 'mid' : 'bad');
+            let tD = 0, tW = 0, tL = 0, tR = 0;
+            repPerformance.forEach(r => {
+                const wr = Number(r.win_rate || 0);
+                tD += Number(r.deals || 0); tW += Number(r.won || 0);
+                tL += Number(r.lost || 0); tR += Number(r.revenue || 0);
+                const tr = document.createElement('tr');
+                tr.style.backgroundColor = rowBg(wr);
+                tr.innerHTML =
+                    '<td>' + (r.rep || '-') + '</td>' +
+                    '<td class="text-center">' + fmt(r.deals) + '</td>' +
+                    '<td class="text-center">' + fmt(r.won) + '</td>' +
+                    '<td class="text-center">' + fmt(r.lost) + '</td>' +
+                    '<td class="text-center"><span class="an-winrate-pill ' + pillClass(wr) + '">' + wr + '%</span></td>' +
+                    '<td class="text-end">' + fmt(r.revenue) + '</td>';
+                body.appendChild(tr);
+            });
+            const twr = tD ? Math.round(1000 * tW / tD) / 10 : 0;
+            const totals = document.createElement('tr');
+            totals.className = 'totals-row';
+            totals.innerHTML =
+                '<td>Total</td>' +
+                '<td class="text-center">' + fmt(tD) + '</td>' +
+                '<td class="text-center">' + fmt(tW) + '</td>' +
+                '<td class="text-center">' + fmt(tL) + '</td>' +
+                '<td class="text-center">' + twr + '%</td>' +
+                '<td class="text-end">' + fmt(tR) + '</td>';
+            body.appendChild(totals);
+        })();
+
+        // Panel: Sales Funnel
+        (function () {
+            const wrap = document.getElementById('salesFunnel');
+            if (!wrap) { return; }
+            const stages = [
+                { label: 'Total Leads', count: 761, pct: 100, color: '#4f46e5' },
+                { label: 'Active', count: 492, pct: 64.6, color: '#6366f1' },
+                { label: 'Deals Created', count: 234, pct: 30.7, color: '#f59e0b' },
+                { label: 'Lost', count: 193, pct: 25.4, color: '#dc2626' },
+                { label: 'Won', count: 6, pct: 0.8, color: '#059669' }
+            ];
+            stages.forEach(s => {
+                const row = document.createElement('div');
+                row.className = 'an-funnel-row';
+
+                // Stage name label above the bar (never clipped).
+                const name = document.createElement('div');
+                name.className = 'an-funnel-name';
+                name.textContent = s.label;
+                row.appendChild(name);
+
+                const track = document.createElement('div');
+                track.className = 'an-funnel-track';
+
+                const bar = document.createElement('div');
+                bar.className = 'an-funnel-bar';
+                bar.style.backgroundColor = s.color;
+                const meta = s.count + ' · ' + s.pct + '%';
+                if (s.pct >= 10) {
+                    // Wide enough — show count · pct% inside the bar on the right.
+                    bar.style.width = s.pct + '%';
+                    bar.innerHTML = '<span class="an-funnel-meta">' + meta + '</span>';
+                    track.appendChild(bar);
+                } else {
+                    // Too short (e.g. Won 0.8%) — fixed 80px bar, empty, label rendered outside.
+                    bar.style.width = '80px';
+                    track.appendChild(bar);
+                    const outside = document.createElement('span');
+                    outside.className = 'an-funnel-outside';
+                    outside.textContent = meta;
+                    track.appendChild(outside);
+                }
+                row.appendChild(track);
+                wrap.appendChild(row);
+            });
+        })();
+
+        // Section 4: Source Ranking
+        (function () {
+            const wrap = document.getElementById('sourceRanking');
+            if (!wrap) { return; }
+            const hoursBySource = {};
+            responseTime.forEach(r => { hoursBySource[r.source] = Number(r.hours); });
+            const hv = responseTime.map(r => Number(r.hours));
+            const minH = hv.length ? Math.min(...hv) : 0;
+            const maxH = hv.length ? Math.max(...hv) : 0;
+            const norm = h => (maxH === minH) ? 0 : (h - minH) / (maxH - minH);
+
+            const ranked = junkBySource.map(r => {
+                const total = (r.junk || 0) + (r.clean || 0);
+                const junkRate = total ? r.junk / total : 0;
+                const has = Object.prototype.hasOwnProperty.call(hoursBySource, r.source);
+                const hours = has ? hoursBySource[r.source] : maxH;
+                const normResp = has ? norm(hours) : 1;
+                const score = (1 - junkRate) * 0.4 + (1 - normResp) * 0.6;
+                return { source: r.source, junkRate, hours: has ? hours : null, score };
+            }).sort((a, b) => b.score - a.score);
+
+            const borderColors = ['#4f46e5', '#6366f1', '#818cf8'];
+            ranked.forEach((r, i) => {
+                let medal, border;
+                if (i === 0) { medal = '🥇'; border = borderColors[0]; }
+                else if (i === 1) { medal = '🥈'; border = borderColors[1]; }
+                else if (i === 2) { medal = '🥉'; border = borderColors[2]; }
+                else if (i === ranked.length - 1) { medal = '🔴'; border = '#dc2626'; }
+                else { medal = '#' + (i + 1); border = '#d1d5db'; }
+                const card = document.createElement('div');
+                card.className = 'an-rank-card';
+                card.style.borderTopColor = border;
+                const hoursTxt = (r.hours != null) ? (r.hours + 'h') : 'N/A';
+                card.innerHTML =
+                    '<div class="an-rank-medal">' + medal + '</div>' +
+                    '<div class="an-rank-name">' + r.source + '</div>' +
+                    '<div class="an-rank-stat">Junk: <strong>' + (r.junkRate * 100).toFixed(1) + '%</strong></div>' +
+                    '<div class="an-rank-stat">Response: <strong>' + hoursTxt + '</strong></div>';
+                wrap.appendChild(card);
+            });
+        })();
+    })();
+</script>
+{% endblock %}

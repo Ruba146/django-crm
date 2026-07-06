@@ -15,6 +15,8 @@ SECTION_PERM_MAP = {
     "tasks": "auth.tasks_view",
     "tickets": "auth.tickets_view",
     "reports": "auth.reports_view",
+    "analytics": "auth.analytics_view",
+    "lead_scoring": "auth.lead_scoring_view",
     "users": "auth.users_view",
 }
 
@@ -66,6 +68,12 @@ RESOURCE_ACTION_PERMS = {
         "create": "auth.reports_create",
         "edit": "auth.reports_edit",
         "delete": "auth.reports_delete",
+    },
+    "analytics": {
+        "view": "auth.analytics_view",
+    },
+    "lead_scoring": {
+        "view": "auth.lead_scoring_view",
     },
     "users": {
         "view": "auth.users_view",
