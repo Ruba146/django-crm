@@ -42,15 +42,15 @@
     <!-- SECTION 2 -->
     <div class="row g-4 mb-3">
         <div class="col-12 col-xl-4">
-            <section class="dash-card an-panel an-panel-2 d-flex flex-column">
+            <section class="dash-card an-panel d-flex flex-column">
                 <div class="an-title">Leads by Source</div>
                 <div class="an-chart-wrap flex-grow-1"><canvas id="leadsBySourceChart"></canvas></div>
             </section>
         </div>
         <div class="col-12 col-xl-4">
-            <section class="dash-card an-panel an-panel-2 d-flex flex-column">
+            <section class="dash-card an-panel d-flex flex-column">
                 <div class="an-title">Sales Rep Performance</div>
-                <div class="table-responsive flex-grow-1">
+                <div class="an-rep-table-wrap flex-grow-1">
                     <table class="table table-sm align-middle mb-0 an-rep-table">
                         <thead>
                             <tr>
@@ -68,9 +68,9 @@
             </section>
         </div>
         <div class="col-12 col-xl-4">
-            <section class="dash-card an-panel an-panel-2 d-flex flex-column">
+            <section class="dash-card an-panel d-flex flex-column">
                 <div class="an-title">Sales Funnel</div>
-                <div id="salesFunnel" class="an-funnel"></div>
+                <div id="salesFunnel" class="an-funnel flex-grow-1"></div>
             </section>
         </div>
     </div>
@@ -122,30 +122,38 @@
     .an-kpi-label { font-size: .8rem; color: #6b7280; margin-top: 6px; font-weight: 500; }
     .an-chart-wrap { position: relative; min-height: 300px; }
 
+    /* Rep table wrapper for horizontal scroll */
+    .an-rep-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        min-height: 300px;
+        max-width: 100%;
+    }
+
     /* Rep table: win-rate colors + subtle alternating overlay */
-    .an-rep-table { font-size: .82rem; }
-    .an-rep-table th, .an-rep-table td { padding: 0.6rem 0.8rem; }
+    .an-rep-table { font-size: .68rem; }
+    .an-rep-table th, .an-rep-table td { padding: 0.25rem 0.4rem; }
     .an-rep-table thead th { color: #6b7280; font-weight: 600; border-bottom: 1px solid #e5e7eb; }
     .an-rep-table tbody tr:nth-child(even) { box-shadow: inset 0 0 0 999px rgba(0,0,0,.025); }
     .an-rep-table .totals-row { font-weight: 800; border-top: 2px solid #334155; background: #f8fafc !important; box-shadow: none !important; }
-    .an-winrate-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-weight: 700; font-size: .74rem; }
+    .an-winrate-pill { display: inline-block; padding: 1px 5px; border-radius: 999px; font-weight: 700; font-size: .6rem; }
     .an-winrate-pill.good { background: #059669; color: #fff; }
     .an-winrate-pill.mid  { background: #f59e0b; color: #fff; }
     .an-winrate-pill.bad  { background: #dc2626; color: #fff; }
 
     /* Funnel */
-    .an-funnel { display: flex; flex-direction: column; justify-content: flex-start; width: 100%; }
-    .an-funnel .an-funnel-row { display: flex; flex-direction: column; width: 100%; margin-bottom: 10px; }
-    .an-funnel .an-funnel-name { font-size: .8rem; font-weight: 700; color: #334155; margin-bottom: 4px; }
-    .an-funnel .an-funnel-track { display: flex; align-items: center; gap: 10px; width: 100%; }
+    .an-funnel { display: flex; flex-direction: column; justify-content: flex-start; width: 100%; min-height: 300px; }
+    .an-funnel .an-funnel-row { display: flex; flex-direction: column; width: 100%; margin-bottom: 6px; }
+    .an-funnel .an-funnel-name { font-size: .72rem; font-weight: 700; color: #334155; margin-bottom: 2px; }
+    .an-funnel .an-funnel-track { display: flex; align-items: center; gap: 6px; width: 100%; }
     .an-funnel .an-funnel-bar {
-        height: 44px; min-width: 80px; border-radius: 8px; padding: 0 12px;
+        height: 28px; min-width: 60px; border-radius: 6px; padding: 0 8px;
         display: flex; align-items: center; justify-content: space-between;
-        color: #fff; font-size: .85rem; font-weight: 600; white-space: nowrap;
+        color: #fff; font-size: .72rem; font-weight: 600; white-space: nowrap;
         box-shadow: 0 1px 2px rgba(0,0,0,.12); overflow: visible; flex-shrink: 0;
     }
     .an-funnel .an-funnel-bar .an-funnel-meta { margin-left: auto; }
-    .an-funnel .an-funnel-outside { color: #374151; font-weight: 700; font-size: .85rem; white-space: nowrap; flex-shrink: 0; margin-left: 8px; background: none; border: none; box-shadow: none; }
+    .an-funnel .an-funnel-outside { color: #374151; font-weight: 700; font-size: .72rem; white-space: nowrap; flex-shrink: 0; margin-left: 6px; background: none; border: none; box-shadow: none; }
 
     /* Source ranking cards */
     .an-ranking { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -346,8 +354,8 @@
                     bar.innerHTML = '<span class="an-funnel-meta">' + meta + '</span>';
                     track.appendChild(bar);
                 } else {
-                    // Too short (e.g. Won 0.8%) — fixed 80px bar, empty, label rendered outside.
-                    bar.style.width = '80px';
+                    // Too short (e.g. Won 0.8%) — fixed 60px bar, empty, label rendered outside.
+                    bar.style.width = '60px';
                     track.appendChild(bar);
                     const outside = document.createElement('span');
                     outside.className = 'an-funnel-outside';

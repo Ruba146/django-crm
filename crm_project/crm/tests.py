@@ -266,7 +266,7 @@ class CRMPageTests(TestCase):
         self.assertIn('id="taskToastContainer"', base_html)
         self.assertIn("js/task-center.js", base_html)
         self.assertIn("REMINDER_WINDOW_SECONDS = 3 * 60 * 60", task_center_js)
-        self.assertIn("OVERDUE_REMINDER_WINDOW_SECONDS = 7 * 24 * 60 * 60", task_center_js)
+        self.assertNotIn("OVERDUE_REMINDER_WINDOW_SECONDS", task_center_js)
         self.assertIn("expandedReminderId", task_center_js)
         self.assertIn("dismissedReminderIds", task_center_js)
         self.assertIn("dataset.taskReminderExpanded", task_center_js)

@@ -403,7 +403,9 @@ def _fetch_contact_details(contact):
                 "name": deal.get("name") or "Deal",
                 "amount": deal.get("expected_value_minor") or deal.get("won_value_minor") or "-",
                 "stage": pipeline_stages.get(deal.get("stage_id"), deal.get("stage_id") or "-"),
+                "status": deal.get("status") or "-",
                 "probability": deal.get("probability") or "-",
+                "currency": deal.get("currency_code") or "-",
                 "close_date": deal.get("actual_close_date") or deal.get("target_close_date") or deal.get("contract_end_date") or "-",
                 "technical_fields": _build_technical_field_rows(deal),
             }
@@ -414,6 +416,7 @@ def _fetch_contact_details(contact):
                 "title": task.get("title") or task.get("description") or "-",
                 "status": task.get("outcome") or ("Completed" if task.get("completed_at") else "Pending"),
                 "due_date": task.get("due_at") or "-",
+                "priority": task.get("mode") or "-",
                 "description": task.get("description") or task.get("body") or "-",
                 "technical_fields": _build_technical_field_rows(task),
             }
@@ -1999,6 +2002,1151 @@ def deal_detail(request, record_id):
     return redirect("deals")
 
 
+# API Views - Return same data as HTML views but as JSON
+def _build_context_for_template(view_func):
+    """Helper to extract context data from a view function for API use."""
+    def api_wrapper(request, *args, **kwargs):
+        # For API calls, we need to handle GET parameters and return JSON
+        # We'll call the view logic but return JsonResponse instead of render
+        pass
+    return api_wrapper
+
+
+def dashboard_api(request):
+    """API endpoint returning dashboard data as JSON."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM contacts")
+    contacts_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM leads")
+    leads_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM deals")
+    deals_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM activities")
+    activities_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM tasks")
+    tasks_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM tickets")
+    tickets_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT * FROM contacts WHERE deleted_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 5")
+    recent_contacts = [dict(row) for row in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM leads WHERE deleted_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 5")
+    recent_leads = [dict(row) for row in cursor.fetchall()]
+
+    if _is_task_admin(request.user):
+        task_scope = (request.GET.get("task_scope") or "my").strip().lower()
+        if task_scope == "team":
+            task_sql = "SELECT * FROM tasks WHERE assignee_id IS NOT NULL AND assignee_id != ? ORDER BY due_at ASC, rowid DESC LIMIT 5"
+            cursor.execute(task_sql, (str(request.user.id),))
+        elif task_scope == "all":
+            cursor.execute("SELECT * FROM tasks ORDER BY due_at ASC, rowid DESC LIMIT 5")
+        else:
+            cursor.execute("SELECT * FROM tasks WHERE assignee_id = ? ORDER BY due_at ASC, rowid DESC LIMIT 5", (str(request.user.id),))
+    else:
+        cursor.execute("SELECT * FROM tasks WHERE assignee_id = ? ORDER BY due_at ASC, rowid DESC LIMIT 5", (str(request.user.id),))
+        task_scope = "my"
+    upcoming_followups = [dict(row) for row in cursor.fetchall()]
+
+    cursor.execute(
+        "SELECT COALESCE(SUM(COALESCE(won_value_minor, expected_value_minor)), 0) FROM deals WHERE deleted_at IS NULL"
+    )
+    total_pipeline_value = cursor.fetchone()[0] or 0
+
+    cursor.execute(
+        "SELECT name, COALESCE(expected_value_minor, won_value_minor) AS amount FROM deals WHERE deleted_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 7"
+    )
+    chart_rows = cursor.fetchall()
+
+    chart_labels = [(_display(row[0])[:18] or f"Deal {index + 1}") for index, row in enumerate(chart_rows)]
+    chart_values = []
+    for row in chart_rows:
+        try:
+            chart_values.append(float(row[1] or 0))
+        except Exception:
+            chart_values.append(0)
+
+    conn.close()
+    task_dashboard = _task_state_data(request.user)["dashboard"]
+
+    return JsonResponse({
+        "contacts_count": contacts_count,
+        "leads_count": leads_count,
+        "deals_count": deals_count,
+        "activities_count": activities_count,
+        "tasks_count": tasks_count,
+        "tickets_count": tickets_count,
+        "recent_contacts": recent_contacts,
+        "recent_leads": recent_leads,
+        "upcoming_followups": upcoming_followups,
+        "total_pipeline_value": _format_amount(total_pipeline_value),
+        "chart_labels": chart_labels,
+        "chart_values": chart_values,
+        "chart_labels_json": json.dumps(chart_labels),
+        "chart_values_json": json.dumps(chart_values),
+        "recent_activities": [dict(row) for row in fetch_latest_rows("activities")],
+        "recent_deals": [dict(row) for row in fetch_latest_rows("deals")],
+        "recent_tasks": [dict(row) for row in fetch_latest_rows("tasks")],
+        "task_dashboard": task_dashboard,
+        "assignable_users": [{"id": str(u.id), "username": u.username, "full_name": u.get_full_name() or u.username} for u in _task_assignable_users(request.user)],
+    })
+
+
+def leads_api(request):
+    """API endpoint returning leads data as JSON."""
+    query = (request.GET.get("q") or "").strip()
+    sort_field = (request.GET.get("sort") or "created_at").strip()
+    sort_order = (request.GET.get("order") or "desc").strip().lower()
+    page_number = request.GET.get("page", 1)
+    conn = _connect()
+    cursor = conn.cursor()
+
+    sql = "SELECT * FROM leads WHERE deleted_at IS NULL"
+    params = []
+    if query:
+        search_term = f"%{query}%"
+        sql += " AND (full_name LIKE ? OR notes LIKE ? OR custom_fields LIKE ?)"
+        params.extend([search_term, search_term, search_term])
+
+    allowed_sort_fields = {"created_at": "created_at", "full_name": "full_name", "stage_id": "stage_id", "updated_at": "updated_at"}
+    sort_column = allowed_sort_fields.get(sort_field, "created_at")
+    sql += f" ORDER BY {sort_column} {'ASC' if sort_order == 'asc' else 'DESC'}, rowid DESC"
+    cursor.execute(sql, params)
+    lead_rows = cursor.fetchall()
+
+    stage_lookup = _safe_lookup(cursor, "pipeline_stages")
+    company_lookup = _safe_lookup(cursor, "establishments")
+    owner_lookup = _safe_lookup(cursor, "users")
+    if not owner_lookup:
+        owner_lookup = _safe_lookup(cursor, "employees")
+
+    lead_list = []
+    for lead in lead_rows:
+        lead_dict = dict(lead)
+        stage_name = _display(stage_lookup.get(str(lead_dict.get("stage_id"))))
+        ai_payload = AIScoringService.build_payload(cursor, "lead", lead_dict.get("id"), stage_history=[stage_name] if stage_name and stage_name != "-" else None)
+        ai_score = AIScoringService.score(ai_payload)
+        lead_list.append({
+            "row": lead_dict,
+            "details": {
+                "name": _display(lead_dict.get("full_name")),
+                "company": _display(company_lookup.get(str(lead_dict.get("establishment_id"))) or lead_dict.get("company_name")),
+                "stage": stage_name,
+                "status": "Active" if (lead_dict.get("notes") or lead_dict.get("normalized_phone") or lead_dict.get("normalized_email")) else "Pending",
+                "phone": _display(lead_dict.get("normalized_phone")),
+                "email": _display(lead_dict.get("normalized_email")),
+                "value": _display(_extract_custom_value(lead_dict.get("custom_fields")) or lead_dict.get("value")),
+                "owner": _display(owner_lookup.get(str(lead_dict.get("owner_id"))) or lead_dict.get("owner_id")),
+                "notes": _display(lead_dict.get("notes")),
+                "ai_score": f"{ai_score['score']}%",
+                "ai_confidence": ai_score["confidence"],
+                "ai_reasons": ai_score["reasons"],
+            },
+        })
+
+    paginator = Paginator(lead_list, 15)
+    page_obj = paginator.get_page(page_number)
+    conn.close()
+    return JsonResponse({
+        "lead_list": page_obj.object_list,
+        "page_obj": {"number": page_obj.number, "has_next": page_obj.has_next(), "has_previous": page_obj.has_previous(), "num_pages": page_obj.num_pages},
+        "page_query": _query_without(request, "page"),
+        "page_query_params": [(key, value) for key, value in request.GET.items() if key != "page"],
+        "query": query,
+        "sort": sort_field,
+        "order": sort_order,
+        "stage_lookup": stage_lookup,
+    })
+
+
+def deals_api(request):
+    """API endpoint returning deals data as JSON."""
+    query = (request.GET.get("q") or "").strip()
+    stage_filter = (request.GET.get("stage") or "").strip()
+    page_number = request.GET.get("page", 1)
+    search_mode = bool(query)
+    conn = _connect()
+    cursor = conn.cursor()
+
+    sql = "SELECT * FROM deals WHERE deleted_at IS NULL"
+    params = []
+
+    sql += " ORDER BY created_at DESC, rowid DESC"
+    cursor.execute(sql, params)
+    deal_rows = cursor.fetchall()
+
+    stage_lookup = _safe_lookup(cursor, "pipeline_stages")
+    company_lookup = _safe_lookup(cursor, "establishments")
+    contact_lookup = _safe_lookup(cursor, "contacts", label_columns=("full_name", "name", "label"))
+    lead_lookup = _safe_lookup(cursor, "leads", label_columns=("full_name", "name", "label"))
+
+    stage_columns = []
+    try:
+        cursor.execute("PRAGMA table_info(pipeline_stages)")
+        stage_table_columns = [row[1] for row in cursor.fetchall()]
+        stage_label_column = next(
+            (column for column in ("name", "label", "title", "display_name") if column in stage_table_columns),
+            None,
+        )
+        if stage_label_column:
+            cursor.execute(f"SELECT id, {stage_label_column} FROM pipeline_stages ORDER BY rowid ASC")
+            stage_columns = [
+                {"id": str(row[0]), "name": _display(row[1])}
+                for row in cursor.fetchall()
+                if row[0] is not None
+            ]
+    except Exception:
+        stage_columns = []
+
+    if not stage_columns:
+        stage_columns = [{"id": "unassigned", "name": "Unassigned"}]
+
+    activity_type_lookup = _safe_lookup(cursor, "activity_types")
+    activity_type_options = sorted(
+        [{"id": key, "name": value} for key, value in activity_type_lookup.items()],
+        key=lambda option: option["name"],
+    )
+
+    def _stage_name_from_id(stage_id):
+        if stage_id is None:
+            return "Unassigned"
+        stage_name = stage_lookup.get(str(stage_id))
+        return _display(stage_name if stage_name and stage_name != "-" else "Unassigned")
+
+    def _resolve_deal_customer(deal_dict):
+        contact_id = deal_dict.get("contact_id")
+        lead_id = deal_dict.get("lead_id")
+        establishment_id = deal_dict.get("establishment_id")
+
+        if contact_id and contact_lookup.get(str(contact_id)):
+            return _display(contact_lookup.get(str(contact_id)))
+        if lead_id and lead_lookup.get(str(lead_id)):
+            return _display(lead_lookup.get(str(lead_id)))
+        if establishment_id and company_lookup.get(str(establishment_id)):
+            return _display(company_lookup.get(str(establishment_id)))
+        return "-"
+
+    def _resolve_deal_owner(deal_dict):
+        owner_id = deal_dict.get("owner_id") or deal_dict.get("assignee_id") or deal_dict.get("created_by")
+        return _resolve_owner(cursor, owner_id)
+
+    deal_list = []
+    for deal in deal_rows:
+        deal_dict = dict(deal)
+        amount = deal_dict.get("won_value_minor") or deal_dict.get("expected_value_minor")
+        close_date = deal_dict.get("actual_close_date") or deal_dict.get("target_close_date") or deal_dict.get("contract_end_date")
+        stage_name = _stage_name_from_id(deal_dict.get("stage_id"))
+
+        ai_payload = AIScoringService.build_payload(cursor, "deal", deal_dict.get("id"), stage_history=[stage_name] if stage_name and stage_name != "Unassigned" else None)
+        ai_score = AIScoringService.score(ai_payload)
+        details = {
+            "name": _display(deal_dict.get("name")),
+            "customer": _resolve_deal_customer(deal_dict),
+            "amount": _format_amount(amount, deal_dict.get("currency_code")),
+            "stage": stage_name,
+            "close_date": _format_date(close_date),
+            "probability": _format_probability(deal_dict.get("probability_pct")),
+            "currency": _display(deal_dict.get("currency_code")),
+            "assigned_user": _resolve_deal_owner(deal_dict),
+            "notes": _display(deal_dict.get("notes")),
+            "ai_score": f"{ai_score['score']}%",
+            "ai_confidence": ai_score["confidence"],
+            "ai_reasons": ai_score["reasons"],
+        }
+
+        item = {
+            "row": deal_dict,
+            "details": details,
+        }
+
+        deal_list.append(item)
+
+    query_lower = query.lower()
+    query_filtered_deal_list = []
+    for item in deal_list:
+        details = item["details"]
+        if query_lower:
+            searchable = " ".join([
+                _display(details.get("name")).lower(),
+                _display(details.get("customer")).lower(),
+                _display(details.get("stage")).lower(),
+                _display(details.get("amount")).lower(),
+                _display(details.get("probability")).lower(),
+                _display(details.get("close_date")).lower(),
+                _display(details.get("assigned_user")).lower(),
+                _display(details.get("currency")).lower(),
+                _display(details.get("notes")).lower(),
+                _display(item["row"].get("currency_code")).lower(),
+            ])
+            if query_lower not in searchable:
+                continue
+
+        query_filtered_deal_list.append(item)
+
+    filtered_deal_list = []
+    normalized_stage_filter = stage_filter.lower()
+    for item in query_filtered_deal_list:
+        details = item["details"]
+        if stage_filter and normalized_stage_filter not in {"all stages", ""}:
+            if (details.get("stage") or "").lower() != normalized_stage_filter:
+                continue
+        filtered_deal_list.append(item)
+
+    paginator = Paginator(filtered_deal_list, 10)
+    page_obj = paginator.get_page(page_number)
+    paged_deals = list(page_obj.object_list)
+
+    stage_items_map = {}
+    for item in paged_deals:
+        stage_name = item["details"].get("stage") or "Unassigned"
+        if stage_name not in stage_items_map:
+            stage_items_map[stage_name] = []
+        stage_items_map[stage_name].append(item)
+
+    display_stage_columns = []
+    if not search_mode:
+        for column in stage_columns:
+            stage_items = stage_items_map.get(column["name"], [])
+            if not stage_items:
+                continue
+            display_stage_columns.append({
+                "id": column["id"],
+                "name": column["name"],
+                "items": stage_items,
+            })
+
+    # Build detail data for each deal
+    page_contact_ids = set()
+    page_lead_ids = set()
+    for item in paged_deals:
+        deal_row = item["row"]
+        if deal_row.get("contact_id"):
+            page_contact_ids.add(str(deal_row.get("contact_id")))
+        if deal_row.get("lead_id"):
+            page_lead_ids.add(str(deal_row.get("lead_id")))
+
+    contact_rows = {}
+    if page_contact_ids:
+        placeholders = ", ".join("?" for _ in page_contact_ids)
+        cursor.execute(f"SELECT * FROM contacts WHERE CAST(id AS TEXT) IN ({placeholders})", list(page_contact_ids))
+        contact_rows = {str(row["id"]): dict(row) for row in cursor.fetchall() if row["id"]}
+
+    lead_rows = {}
+    if page_lead_ids:
+        placeholders = ", ".join("?" for _ in page_lead_ids)
+        cursor.execute(f"SELECT * FROM leads WHERE CAST(id AS TEXT) IN ({placeholders})", list(page_lead_ids))
+        lead_rows = {str(row["id"]): dict(row) for row in cursor.fetchall() if row["id"]}
+
+    for item in paged_deals:
+        deal_row = item["row"]
+        details = item["details"]
+        deal_id = deal_row.get("id")
+        if not deal_id:
+            continue
+
+        contact_row = contact_rows.get(str(deal_row.get("contact_id")), {})
+        lead_row = lead_rows.get(str(deal_row.get("lead_id")), {})
+
+        contact_name = _display(
+            contact_row.get("full_name")
+            or lead_row.get("full_name")
+            or details.get("customer")
+        )
+        contact_email = _display(contact_row.get("email") or lead_row.get("normalized_email"))
+        contact_phone = _display(contact_row.get("phone") or lead_row.get("normalized_phone"))
+        company_value = _display(
+            company_lookup.get(str(deal_row.get("establishment_id")))
+            or contact_row.get("company")
+            or lead_row.get("company_name")
+        )
+
+        # Build timeline for each deal
+        timeline_rows = []
+        entity_targets = [("deal", str(deal_id))]
+        if deal_row.get("contact_id"):
+            entity_targets.append(("contact", str(deal_row.get("contact_id"))))
+        if deal_row.get("lead_id"):
+            entity_targets.append(("lead", str(deal_row.get("lead_id"))))
+
+        deal_activities = []
+        for entity_type, entity_id in entity_targets:
+            cursor.execute(
+                "SELECT * FROM activities WHERE LOWER(entity_type) = LOWER(?) AND CAST(entity_id AS TEXT) = ? ORDER BY rowid DESC LIMIT 80",
+                (entity_type, entity_id),
+            )
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                deal_activities.append({
+                    "icon": _activity_icon(_display(activity_type_lookup.get(str(row_dict.get("activity_type_id"))))),
+                    "activity_type": _display(activity_type_lookup.get(str(row_dict.get("activity_type_id")))),
+                    "date": _format_date(_activity_timestamp(row_dict)),
+                    "assigned_user": _resolve_owner(cursor, row_dict.get("user_id") or row_dict.get("owner_id") or row_dict.get("created_by")),
+                    "status": "Completed" if row_dict.get("outcome") else "Pending",
+                    "direction": _display(row_dict.get("direction")),
+                    "description": _display(row_dict.get("body")),
+                    "outcome": _display(row_dict.get("outcome")),
+                })
+
+        deal_notes = []
+        for entity_type, entity_id in entity_targets:
+            cursor.execute(
+                "SELECT * FROM notes WHERE LOWER(entity_type) = LOWER(?) AND CAST(entity_id AS TEXT) = ? ORDER BY rowid DESC LIMIT 80",
+                (entity_type, entity_id),
+            )
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                note_title, note_body = _split_note_body(row_dict.get("body"))
+                deal_notes.append({
+                    "date": _format_date(row_dict.get("created_at")),
+                    "title": _display(note_title),
+                    "body": _display(note_body),
+                })
+
+        deal_tasks = []
+        for entity_type, entity_id in entity_targets:
+            cursor.execute(
+                "SELECT * FROM tasks WHERE LOWER(entity_type) = LOWER(?) AND CAST(entity_id AS TEXT) = ? ORDER BY rowid DESC LIMIT 80",
+                (entity_type, entity_id),
+            )
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                deal_tasks.append({
+                    "title": _display(row_dict.get("title") or row_dict.get("description")),
+                    "due_date": _format_date(row_dict.get("due_at")),
+                    "status": "Completed" if row_dict.get("completed_at") else "Pending",
+                    "assigned_user": _resolve_owner(cursor, row_dict.get("assignee_id")),
+                    "description": _display(row_dict.get("description")),
+                })
+
+        item["detail"] = {
+            "general": [
+                {"label": "Deal Name", "value": details.get("name")},
+                {"label": "Stage", "value": details.get("stage")},
+                {"label": "Value", "value": details.get("amount")},
+                {"label": "Probability", "value": details.get("probability")},
+                {"label": "Close Date", "value": details.get("close_date")},
+                {"label": "Assigned User", "value": details.get("assigned_user")},
+                {"label": "Currency", "value": details.get("currency")},
+                {"label": "Notes", "value": details.get("notes")},
+            ],
+            "contact": {
+                "name": contact_name,
+                "company": company_value,
+                "phone": contact_phone,
+                "email": contact_email,
+            },
+            "activities": deal_activities,
+            "notes": sorted(deal_notes, key=lambda row: row.get("date") or "", reverse=True),
+            "tasks": sorted(deal_tasks, key=lambda row: row.get("due_date") or "", reverse=True),
+        }
+
+    available_stage_names = []
+    for column in stage_columns:
+        column_name = column["name"]
+        has_items = any((item["details"].get("stage") or "Unassigned") == column_name for item in query_filtered_deal_list)
+        if has_items and column_name not in available_stage_names:
+            available_stage_names.append(column_name)
+
+    stage_filter_options = ["All Stages"] + available_stage_names
+
+    conn.close()
+    return JsonResponse({
+        "deal_list": paged_deals,
+        "stage_columns": display_stage_columns,
+        "stage_filter": stage_filter,
+        "stage_filter_options": stage_filter_options,
+        "page_obj": {"number": page_obj.number, "has_next": page_obj.has_next(), "has_previous": page_obj.has_previous(), "num_pages": page_obj.num_pages},
+        "page_query": _query_without(request, "page"),
+        "page_query_params": [(key, value) for key, value in request.GET.items() if key != "page"],
+        "query": query,
+        "search_mode": search_mode,
+        "sort": "created_at",
+        "order": "desc",
+        "stage_lookup": stage_lookup,
+        "activity_type_options": activity_type_options,
+    })
+
+
+def activities_api(request):
+    """API endpoint returning activities data as JSON."""
+    query = (request.GET.get("q") or "").strip()
+    activity_type_filter = (request.GET.get("activity_type_id") or "").strip()
+    direction_filter = (request.GET.get("direction") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip().lower()
+    date_filter = (request.GET.get("date") or "").strip()
+    assigned_user_filter = (request.GET.get("assigned_user") or "").strip()
+    sort_field = (request.GET.get("sort") or "created_at").strip()
+    sort_order = (request.GET.get("order") or "desc").strip().lower()
+    page_number = request.GET.get("page", 1)
+    conn = _connect()
+    cursor = conn.cursor()
+
+    sql = "SELECT * FROM activities WHERE 1=1"
+    params = []
+
+    if activity_type_filter:
+        sql += " AND CAST(activity_type_id AS TEXT) = ?"
+        params.append(activity_type_filter)
+
+    if direction_filter:
+        sql += " AND LOWER(direction) = LOWER(?)"
+        params.append(direction_filter)
+
+    if date_filter:
+        sql += " AND (DATE(occurred_at) = DATE(?) OR DATE(created_at) = DATE(?))"
+        params.extend([date_filter, date_filter])
+
+    if assigned_user_filter:
+        sql += " AND (CAST(user_id AS TEXT) = ? OR CAST(owner_id AS TEXT) = ? OR CAST(created_by AS TEXT) = ?)"
+        params.extend([assigned_user_filter, assigned_user_filter, assigned_user_filter])
+
+    allowed_sort_fields = {"created_at": "created_at", "occurred_at": "occurred_at", "outcome": "outcome", "direction": "direction"}
+    sort_column = allowed_sort_fields.get(sort_field, "created_at")
+    sql += f" ORDER BY {sort_column} {'ASC' if sort_order == 'asc' else 'DESC'}, rowid DESC"
+    cursor.execute(sql, params)
+    activity_rows = cursor.fetchall()
+
+    activity_type_lookup = _safe_lookup(cursor, "activity_types")
+    user_lookup = _safe_lookup(cursor, "users")
+    if not user_lookup:
+        user_lookup = _safe_lookup(cursor, "employees")
+    lead_rows_by_id = {}
+    phone_to_lead = {}
+    deal_rows_by_id = {}
+    try:
+        cursor.execute("SELECT * FROM leads")
+        for row in cursor.fetchall():
+            row_dict = dict(row)
+            lead_id = str(row_dict.get("id") or "")
+            if lead_id:
+                lead_rows_by_id[lead_id] = row_dict
+            normalized_candidates = [
+                _normalize_phone(row_dict.get("normalized_phone")),
+                _normalize_phone(row_dict.get("phone")),
+            ]
+            for phone in normalized_candidates:
+                if phone:
+                    phone_to_lead[phone] = row_dict
+    except Exception:
+        lead_rows_by_id = {}
+        phone_to_lead = {}
+
+    try:
+        cursor.execute("SELECT * FROM deals WHERE deleted_at IS NULL")
+        for row in cursor.fetchall():
+            row_dict = dict(row)
+            deal_id = str(row_dict.get("id") or "")
+            if deal_id:
+                deal_rows_by_id[deal_id] = row_dict
+    except Exception:
+        deal_rows_by_id = {}
+
+    direction_options = set()
+    assigned_user_options = {}
+    grouped_leads = {}
+
+    def _extract_activity_phone(activity_dict):
+        for field in ("phone", "phone_number", "normalized_phone", "from_phone", "to_phone", "contact_phone"):
+            normalized = _normalize_phone(activity_dict.get(field))
+            if normalized:
+                return normalized
+        return ""
+
+    def _resolve_lead(activity_dict):
+        entity_type = (activity_dict.get("entity_type") or "").strip().lower()
+        entity_id = str(activity_dict.get("entity_id") or "").strip()
+
+        if entity_type == "lead" and entity_id:
+            lead_row = lead_rows_by_id.get(entity_id, {})
+            lead_name = _display(lead_row.get("full_name"))
+            lead_phone = _display(lead_row.get("normalized_phone") or lead_row.get("phone"))
+            if lead_row:
+                return f"lead:{entity_id}", lead_name, lead_phone
+            return f"lead:{entity_id}", f"Lead {entity_id[:8]}", "-"
+
+        if entity_type == "deal" and entity_id:
+            deal_row = deal_rows_by_id.get(entity_id, {})
+            if deal_row:
+                linked_lead_id = str(deal_row.get("lead_id") or "")
+                if linked_lead_id and linked_lead_id in lead_rows_by_id:
+                    lead_row = lead_rows_by_id[linked_lead_id]
+                    return f"lead:{linked_lead_id}", _display(lead_row.get("full_name")), _display(lead_row.get("normalized_phone") or lead_row.get("phone"))
+                return f"deal:{entity_id}", _display(deal_row.get("name") or f"Deal {entity_id[:8]}"), "-"
+            return f"deal:{entity_id}", f"Deal {entity_id[:8]}", "-"
+
+        phone_key = _extract_activity_phone(activity_dict)
+        if phone_key and phone_to_lead.get(phone_key):
+            lead_row = phone_to_lead.get(phone_key)
+            lead_id = str(lead_row.get("id"))
+            lead_name = _display(lead_row.get("full_name"))
+            lead_phone = _display(lead_row.get("normalized_phone") or phone_key)
+            return f"lead:{lead_id}", lead_name, lead_phone
+
+        fallback_id = activity_dict.get("id") or activity_dict.get("rowid") or uuid.uuid4().hex
+        return f"unresolved:{fallback_id}", "Unknown Customer", "-"
+
+    def _build_activity_item(activity_dict):
+        activity_type = _display(activity_type_lookup.get(str(activity_dict.get("activity_type_id"))))
+        status = "Completed" if activity_dict.get("outcome") else "Pending"
+        assigned_user_id = activity_dict.get("user_id") or activity_dict.get("owner_id") or activity_dict.get("created_by")
+        assigned_user = _display(user_lookup.get(str(assigned_user_id)) if assigned_user_id else None)
+        return {
+            "id": _display(activity_dict.get("id")),
+            "icon": _activity_icon(activity_type),
+            "activity_type": activity_type,
+            "date": _format_date(_activity_timestamp(activity_dict)),
+            "date_raw": _activity_timestamp(activity_dict),
+            "direction": _display(activity_dict.get("direction")),
+            "status": status,
+            "assigned_user": assigned_user,
+            "description": _display(activity_dict.get("body")),
+            "outcome": _display(activity_dict.get("outcome")),
+        }
+
+    for activity in activity_rows:
+        activity_dict = dict(activity)
+        activity_item = _build_activity_item(activity_dict)
+        status = activity_item["status"]
+
+        if status_filter and status.lower() != status_filter:
+            continue
+
+        if activity_dict.get("direction"):
+            direction_options.add(_display(activity_dict.get("direction")))
+
+        assigned_user_id = activity_dict.get("user_id") or activity_dict.get("owner_id") or activity_dict.get("created_by")
+        assigned_user = activity_item["assigned_user"]
+        if assigned_user_id and assigned_user and assigned_user != "-":
+            assigned_user_options[str(assigned_user_id)] = assigned_user
+
+        lead_key, lead_name, lead_phone = _resolve_lead(activity_dict)
+        if lead_key not in grouped_leads:
+            grouped_leads[lead_key] = {
+                "lead_key": lead_key,
+                "customer_name": lead_name,
+                "phone": lead_phone,
+                "assigned_user": assigned_user,
+                "items": [],
+                "type_options": set(),
+                "latest_date": "",
+            }
+
+        group = grouped_leads[lead_key]
+        if lead_phone and lead_phone != "-":
+            group["phone"] = lead_phone
+
+        group["items"].append(activity_item)
+        if activity_item["activity_type"] and activity_item["activity_type"] != "-":
+            group["type_options"].add(activity_item["activity_type"])
+        if not group["latest_date"] or activity_item["date_raw"] > group["latest_date"]:
+            group["latest_date"] = activity_item["date_raw"]
+            group["assigned_user"] = activity_item["assigned_user"]
+
+    customer_groups = []
+    for group in grouped_leads.values():
+        sorted_items = sorted(group["items"], key=lambda row: row.get("date_raw") or "", reverse=True)
+        latest = sorted_items[0] if sorted_items else None
+        group_record = {
+            "customer_key": group["lead_key"],
+            "customer_name": group["customer_name"],
+            "phone": group["phone"],
+            "assigned_user": group["assigned_user"],
+            "last_activity_type": latest.get("activity_type") if latest else "-",
+            "last_activity_date": latest.get("date") if latest else "-",
+            "activity_count": len(sorted_items),
+            "type_options": sorted(group["type_options"]),
+            "timeline": sorted_items,
+        }
+        if query:
+            query_lower = query.lower()
+            searchable = " ".join([
+                str(group_record.get("customer_name") or "").lower(),
+                str(group_record.get("phone") or "").lower(),
+            ])
+            if query_lower not in searchable:
+                continue
+        customer_groups.append(group_record)
+
+    customer_groups = sorted(
+        customer_groups,
+        key=lambda group: group["timeline"][0].get("date_raw") if group["timeline"] else "",
+        reverse=True,
+    )
+
+    paginator = Paginator(customer_groups, 15)
+    page_obj = paginator.get_page(page_number)
+    conn.close()
+    return JsonResponse({
+        "activity_groups": page_obj.object_list,
+        "page_obj": {"number": page_obj.number, "has_next": page_obj.has_next(), "has_previous": page_obj.has_previous(), "num_pages": page_obj.num_pages},
+        "page_query": _query_without(request, "page"),
+        "page_query_params": [(key, value) for key, value in request.GET.items() if key != "page"],
+        "query": query,
+        "activity_type_filter": activity_type_filter,
+        "direction_filter": direction_filter,
+        "status_filter": status_filter,
+        "date_filter": date_filter,
+        "assigned_user_filter": assigned_user_filter,
+        "direction_options": sorted(direction_options),
+        "assigned_user_options": assigned_user_options,
+        "sort": sort_field,
+        "order": sort_order,
+        "activity_type_lookup": activity_type_lookup,
+    })
+
+
+def tasks_api(request):
+    """API endpoint returning tasks data as JSON."""
+    query = (request.GET.get("q") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip().lower()
+    priority_filter = (request.GET.get("priority") or "").strip()
+    due_filter = (request.GET.get("due") or "").strip().lower()
+    assignee_filter = (request.GET.get("assignee") or "").strip()
+    selected_task_id = (request.GET.get("task") or "").strip()
+    page_number = request.GET.get("page", 1)
+    conn = _connect()
+    cursor = conn.cursor()
+    _normalize_task_ids(cursor)
+    conn.commit()
+
+    task_rows = _visible_task_rows(request.user)
+    if selected_task_id:
+        selected_normalized_id = _coerce_task_id(selected_task_id, cursor)
+        task_rows = [
+            row for row in task_rows
+            if str(row.get("id")) == str(selected_normalized_id)
+        ]
+    if query:
+        search_term = query.lower()
+        task_rows = [
+            row for row in task_rows
+            if any(search_term in str(row.get(field) or "").lower() for field in ("title", "description", "outcome", "mode"))
+        ]
+    if status_filter == "completed":
+        task_rows = [row for row in task_rows if _task_is_completed(row)]
+    elif status_filter == "pending":
+        task_rows = [row for row in task_rows if not _task_is_completed(row)]
+    if priority_filter:
+        task_rows = [row for row in task_rows if str(row.get("mode") or "") == priority_filter]
+    if due_filter == "today":
+        today = datetime.now().date().isoformat()
+        task_rows = [row for row in task_rows if str(row.get("due_at") or "").startswith(today)]
+    elif due_filter == "this_week":
+        start_date = datetime.now().date() - timedelta(days=datetime.now().weekday())
+        end_date = start_date + timedelta(days=6)
+        task_rows = [
+            row for row in task_rows
+            if (parsed_due := _parse_task_due(row.get("due_at"))) and start_date <= parsed_due.date() <= end_date
+        ]
+    elif due_filter == "overdue":
+        now = datetime.now()
+        task_rows = [
+            row for row in task_rows
+            if not _task_is_completed(row) and (parsed_due := _parse_task_due(row.get("due_at"))) and parsed_due < now
+        ]
+    elif due_filter == "completed_today":
+        today = datetime.now().date().isoformat()
+        task_rows = [
+            row for row in task_rows
+            if _task_is_completed(row) and str(row.get("completed_at") or "").startswith(today)
+        ]
+    if _is_task_admin(request.user) and assignee_filter:
+        task_rows = [row for row in task_rows if str(row.get("assignee_id") or "") == assignee_filter]
+
+    task_list = []
+    for task in task_rows:
+        task_dict = dict(task)
+        task_id = _coerce_task_id(task_dict.get("id"), cursor)
+        if task_id is not None:
+            task_dict["id"] = task_id
+        raw_due = str(task_dict.get("due_at") or "").strip()
+        due_time = ""
+        if raw_due and "T" in raw_due:
+            try:
+                due_time = datetime.fromisoformat(raw_due.replace("Z", "+00:00")).strftime("%H:%M")
+            except Exception:
+                due_time = ""
+        task_list.append({
+            "row": task_dict,
+            "details": {
+                "title": _display(task_dict.get("title")),
+                "description": _display(task_dict.get("description")),
+                "due_date": _format_date(task_dict.get("due_at")),
+                "due_time": due_time,
+                "priority": _display(task_dict.get("mode") or "Medium"),
+                "status": "Completed" if bool(task_dict.get("completed_at")) or str(task_dict.get("outcome") or "").strip().lower() == "completed" else _display(task_dict.get("outcome") or "Pending"),
+                "assigned_user": _resolve_owner(cursor, task_dict.get("assignee_id")),
+                "created_by": "-",
+                "bucket": _task_due_bucket(task_dict),
+                "is_completed": bool(task_dict.get("completed_at")) or str(task_dict.get("outcome") or "").strip().lower() == "completed",
+            },
+        })
+
+    paginator = Paginator(task_list, 20)
+    page_obj = paginator.get_page(page_number)
+    conn.close()
+
+    visible_user_ids = [str(user.id) for user in _task_assignable_users(request.user)]
+    assignee_user_lookup = {str(user.id): _task_user_label(user) for user in User.objects.filter(is_active=True, id__in=[int(uid) for uid in visible_user_ids if str(uid).isdigit()])}
+    calendar_days = defaultdict(list)
+    for task_item in task_list:
+        task_row = task_item["row"]
+        due_at = (task_row.get("due_at") or "").strip()
+        if not due_at:
+            continue
+        try:
+            due_date = datetime.fromisoformat(due_at.replace("Z", "+00:00")).date().isoformat()
+        except Exception:
+            try:
+                due_date = datetime.strptime(due_at, "%Y-%m-%d").date().isoformat()
+            except Exception:
+                continue
+        calendar_days[due_date].append(task_item)
+
+    today = datetime.now().date()
+
+    try:
+        calendar_year = int(request.GET.get("cal_year") or today.year)
+    except (TypeError, ValueError):
+        calendar_year = today.year
+    try:
+        calendar_month = int(request.GET.get("cal_month") or today.month)
+    except (TypeError, ValueError):
+        calendar_month = today.month
+
+    if calendar_month < 1:
+        calendar_month = 12
+        calendar_year -= 1
+    elif calendar_month > 12:
+        calendar_month = 1
+        calendar_year += 1
+    calendar_year = max(1, min(calendar_year, 9999))
+
+    calendar_month_matrix = calendar.Calendar(firstweekday=0).monthdayscalendar(calendar_year, calendar_month)
+    calendar_payload = []
+    for week in calendar_month_matrix:
+        row_days = []
+        for day in week:
+            if day == 0:
+                row_days.append({"day": None, "date_key": None, "tasks": []})
+                continue
+            date_obj = datetime(calendar_year, calendar_month, day).date()
+            date_key = date_obj.isoformat()
+            row_days.append({"day": day, "date_key": date_key, "tasks": calendar_days.get(date_key, []), "is_today": date_obj == today})
+        calendar_payload.append(row_days)
+
+    if calendar_month == 1:
+        prev_month, prev_month_year = 12, calendar_year - 1
+    else:
+        prev_month, prev_month_year = calendar_month - 1, calendar_year
+
+    if calendar_month == 12:
+        next_month, next_month_year = 1, calendar_year + 1
+    else:
+        next_month, next_month_year = calendar_month + 1, calendar_year
+
+    return JsonResponse({
+        "task_list": page_obj.object_list,
+        "page_obj": {"number": page_obj.number, "has_next": page_obj.has_next(), "has_previous": page_obj.has_previous(), "num_pages": page_obj.num_pages},
+        "page_query": _query_without(request, "page"),
+        "page_query_params": [(key, value) for key, value in request.GET.items() if key != "page"],
+        "query": query,
+        "status_filter": status_filter,
+        "priority_filter": priority_filter,
+        "due_filter": due_filter,
+        "assignee_filter": assignee_filter,
+        "selected_task_id": selected_task_id,
+        "assignee_user_lookup": assignee_user_lookup,
+        "calendar_payload": calendar_payload,
+        "calendar_year": calendar_year,
+        "calendar_month": calendar_month,
+        "calendar_month_name": calendar.month_name[calendar_month],
+        "calendar_prev_month_query": f"cal_year={prev_month_year}&cal_month={prev_month}",
+        "calendar_next_month_query": f"cal_year={next_month_year}&cal_month={next_month}",
+        "calendar_prev_year_query": f"cal_year={calendar_year - 1}&cal_month={calendar_month}",
+        "calendar_next_year_query": f"cal_year={calendar_year + 1}&cal_month={calendar_month}",
+        "calendar_today_query": f"cal_year={today.year}&cal_month={today.month}",
+        "task_scope": "all" if _is_task_admin(request.user) else "my",
+        "is_admin": _is_task_admin(request.user),
+        "assignable_users": [{"id": str(u.id), "username": u.username, "full_name": u.get_full_name() or u.username, "get_full_name": u.get_full_name() or u.username} for u in _task_assignable_users(request.user)],
+    })
+
+
+def tickets_api(request):
+    """API endpoint returning tickets data as JSON."""
+    query = (request.GET.get("q") or "").strip()
+    sort_field = (request.GET.get("sort") or "created_at").strip()
+    sort_order = (request.GET.get("order") or "desc").strip().lower()
+    page_number = request.GET.get("page", 1)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    sql = "SELECT * FROM tickets"
+    params = []
+    if query:
+        search_term = f"%{query}%"
+        sql += " WHERE title LIKE ? OR description LIKE ? OR priority LIKE ? OR status LIKE ?"
+        params.extend([search_term, search_term, search_term, search_term])
+
+    allowed_sort_fields = {"created_at": "created_at", "priority": "priority", "status": "status", "title": "title"}
+    sort_column = allowed_sort_fields.get(sort_field, "created_at")
+    sql += f" ORDER BY {sort_column} {'ASC' if sort_order == 'asc' else 'DESC'}, rowid DESC"
+    cursor.execute(sql, params)
+    ticket_rows = cursor.fetchall()
+
+    ticket_list = []
+    for ticket in ticket_rows:
+        ticket_dict = dict(ticket)
+        ticket_list.append({
+            "row": ticket_dict,
+            "details": {
+                "subject": _display(ticket_dict.get("title")),
+                "status": _display(ticket_dict.get("status")),
+                "priority": _display(ticket_dict.get("priority")),
+                "category": _display(ticket_dict.get("type")),
+                "assigned_user": _resolve_owner(cursor, ticket_dict.get("owner_id")),
+                "description": _display(ticket_dict.get("description")),
+            },
+        })
+
+    paginator = Paginator(ticket_list, 15)
+    page_obj = paginator.get_page(page_number)
+    conn.close()
+    return JsonResponse({
+        "ticket_list": page_obj.object_list,
+        "page_obj": {"number": page_obj.number, "has_next": page_obj.has_next(), "has_previous": page_obj.has_previous(), "num_pages": page_obj.num_pages},
+        "page_query": _query_without(request, "page"),
+        "page_query_params": [(key, value) for key, value in request.GET.items() if key != "page"],
+        "query": query,
+        "sort": sort_field,
+        "order": sort_order,
+    })
+
+
+def _analytics_context():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE deleted_at IS NULL")
+    kpi_total = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE junk_reason_id IS NULL AND deleted_at IS NULL")
+    kpi_clean = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE junk_reason_id IS NOT NULL AND deleted_at IS NULL")
+    kpi_junk = cursor.fetchone()[0]
+
+    cursor.execute("""SELECT s.label, COUNT(l.id) as count
+        FROM leads l JOIN sources s ON l.primary_source_id = s.id
+        WHERE l.deleted_at IS NULL GROUP BY s.label ORDER BY count DESC""")
+    leads_by_source = [{"source": r[0], "count": r[1]} for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT s.label,
+        SUM(CASE WHEN l.junk_reason_id IS NOT NULL THEN 1 ELSE 0 END) as junk,
+        SUM(CASE WHEN l.junk_reason_id IS NULL THEN 1 ELSE 0 END) as clean
+        FROM leads l JOIN sources s ON l.primary_source_id = s.id
+        WHERE l.deleted_at IS NULL GROUP BY s.label""")
+    junk_by_source = [{"source": r[0], "junk": r[1], "clean": r[2]} for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT u.name, COUNT(d.id),
+        SUM(CASE WHEN ps.terminal_type='won' THEN 1 ELSE 0 END),
+        SUM(CASE WHEN ps.terminal_type='lost' THEN 1 ELSE 0 END),
+        ROUND(100.0*SUM(CASE WHEN ps.terminal_type='won' THEN 1 ELSE 0 END)/COUNT(d.id),1),
+        ROUND(SUM(CASE WHEN ps.terminal_type='won' THEN d.won_value_minor ELSE 0 END)/100.0,0)
+        FROM deals d JOIN users u ON d.owner_id=u.id
+        JOIN pipeline_stages ps ON d.stage_id=ps.id
+        WHERE d.deleted_at IS NULL GROUP BY u.name ORDER BY 2 DESC""")
+    rep_performance = [{"rep": r[0], "deals": r[1], "won": r[2], "lost": r[3], "win_rate": r[4], "revenue": r[5]} for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT lr.label, COUNT(d.id),
+        ROUND(SUM(COALESCE(d.expected_value_minor,0))/100.0,0)
+        FROM deals d JOIN lost_reasons lr ON d.lost_reason_id=lr.id
+        WHERE d.lost_reason_id IS NOT NULL GROUP BY lr.label ORDER BY 2 DESC""")
+    lost_reasons = [{"reason": r[0], "count": r[1], "value_sar": r[2]} for r in cursor.fetchall()]
+
+    cursor.execute("""SELECT s.label,
+        ROUND(AVG((julianday(a.occurred_at)-julianday(l.created_at))*24),1)
+        FROM activities a JOIN leads l ON a.entity_id=l.id AND a.entity_type='lead'
+        JOIN sources s ON l.primary_source_id=s.id
+        WHERE a.occurred_at>l.created_at AND l.deleted_at IS NULL
+        GROUP BY s.label ORDER BY 2 ASC""")
+    response_time = [{"source": r[0], "hours": r[1]} for r in cursor.fetchall()]
+
+    conn.close()
+    return {
+        "kpi_total": kpi_total,
+        "kpi_clean": kpi_clean,
+        "kpi_junk": kpi_junk,
+        "leads_by_source": leads_by_source,
+        "junk_by_source": junk_by_source,
+        "rep_performance": rep_performance,
+        "lost_reasons": lost_reasons,
+        "response_time": response_time,
+        "leads_by_source_json": json.dumps(leads_by_source),
+        "junk_by_source_json": json.dumps(junk_by_source),
+        "rep_performance_json": json.dumps(rep_performance),
+        "lost_reasons_json": json.dumps(lost_reasons),
+        "response_time_json": json.dumps(response_time),
+    }
+
+
+def analytics_api(request):
+    """API endpoint returning analytics data as JSON."""
+    return JsonResponse(_analytics_context())
+
+
+def contacts_api(request):
+    """API endpoint returning contacts data as JSON."""
+    query = (request.GET.get("q") or "").strip()
+    page_number = request.GET.get("page", 1)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    sql = "SELECT * FROM contacts WHERE deleted_at IS NULL"
+    params = []
+    if query:
+        search_term = f"%{query}%"
+        sql += " AND (full_name LIKE ? OR role LIKE ? OR phone LIKE ? OR email LIKE ? OR notes LIKE ?)"
+        params.extend([search_term, search_term, search_term, search_term, search_term])
+
+    sql += " ORDER BY created_at DESC, rowid DESC"
+    cursor.execute(sql, params)
+    contacts_rows = cursor.fetchall()
+    contact_list = []
+    for contact in contacts_rows:
+        contact_list.append({
+            "contact": dict(contact),
+            "details": _fetch_contact_details(contact),
+        })
+
+    paginator = Paginator(contact_list, 15)
+    page_obj = paginator.get_page(page_number)
+    conn.close()
+
+    return JsonResponse({
+        "contact_list": page_obj.object_list,
+        "page_obj": {"number": page_obj.number, "has_next": page_obj.has_next(), "has_previous": page_obj.has_previous(), "num_pages": page_obj.num_pages},
+        "page_query": _query_without(request, "page"),
+        "query": query,
+    })
+
+
+def users_api(request):
+    """API endpoint returning users data as JSON."""
+    _ensure_custom_permissions_and_groups()
+
+    query = (request.GET.get("q") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip().lower()
+    role_filter = (request.GET.get("role") or "").strip()
+    sort_field = (request.GET.get("sort") or "date_joined").strip()
+    sort_order = (request.GET.get("order") or "desc").strip().lower()
+    page_number = request.GET.get("page", 1)
+
+    users_qs = User.objects.all().prefetch_related("groups", "user_permissions").order_by("-date_joined")
+    if query:
+        users_qs = users_qs.filter(
+            models.Q(username__icontains=query)
+            | models.Q(first_name__icontains=query)
+            | models.Q(last_name__icontains=query)
+            | models.Q(email__icontains=query)
+        )
+    if status_filter in {"active", "inactive"}:
+        users_qs = users_qs.filter(is_active=(status_filter == "active"))
+    if role_filter:
+        users_qs = users_qs.filter(groups__name=role_filter)
+
+    sort_map = {
+        "username": "username",
+        "full_name": "first_name",
+        "email": "email",
+        "status": "is_active",
+        "last_login": "last_login",
+        "date_joined": "date_joined",
+    }
+    sort_column = sort_map.get(sort_field, "date_joined")
+    order_prefix = "" if sort_order == "asc" else "-"
+    users_qs = users_qs.order_by(f"{order_prefix}{sort_column}", "username").distinct()
+
+    paginator = Paginator(users_qs, 12)
+    page_obj = paginator.get_page(page_number)
+
+    role_groups = Group.objects.filter(name__in=["System Administrator", "Sales Manager", "Sales Representative", "Support", "Viewer"]).order_by("name")
+    allowed_permission_codes = [name.split(".", 1)[1] for name in ALL_PERMISSION_NAMES]
+    custom_permissions = Permission.objects.filter(codename__in=allowed_permission_codes).order_by("codename")
+    role_permissions = {
+        group.name: list(group.permissions.values_list("id", flat=True))
+        for group in role_groups
+    }
+    role_permissions_json = {
+        role_name: sorted(list(permission_ids))
+        for role_name, permission_ids in role_permissions.items()
+    }
+
+    permissions_by_codename = {permission.codename: permission for permission in custom_permissions}
+    grouped_permissions = []
+    for group_label, group_key in PERMISSION_GROUPS:
+        group_items = []
+        for action_key, action_label in PERMISSION_ACTIONS:
+            codename = f"{group_key}_{action_key}"
+            permission = permissions_by_codename.get(codename)
+            if permission:
+                group_items.append({
+                    "id": permission.id,
+                    "codename": permission.codename,
+                    "action_key": action_key,
+                    "action_label": action_label,
+                    "label": f"{group_label} {action_label}",
+                })
+        if group_items:
+            grouped_permissions.append({
+                "group_label": group_label,
+                "group_key": group_key,
+                "items": group_items,
+            })
+
+    users_data = []
+    for user in page_obj.object_list:
+        users_data.append({
+            "id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "get_full_name": user.get_full_name(),
+            "email": user.email,
+            "is_active": user.is_active,
+            "last_login": user.last_login.isoformat() if user.last_login else None,
+            "date_joined": user.date_joined.isoformat(),
+            "groups": [group.name for group in user.groups.all()],
+            "direct_permission_ids": list(user.user_permissions.values_list("id", flat=True)),
+        })
+
+    return JsonResponse({
+        "users": users_data,
+        "page_obj": {"number": page_obj.number, "has_next": page_obj.has_next(), "has_previous": page_obj.has_previous(), "num_pages": page_obj.num_pages},
+        "page_query": _query_without(request, "page"),
+        "query": query,
+        "status_filter": status_filter,
+        "role_filter": role_filter,
+        "sort": sort_field,
+        "order": sort_order,
+        "role_groups": [{"name": g.name} for g in role_groups],
+        "role_permissions": role_permissions,
+        "role_permissions_json": role_permissions_json,
+        "grouped_permissions": grouped_permissions,
+    })
+
+
 def activity_detail(request, record_id):
     return redirect("activities")
 
@@ -2181,66 +3329,7 @@ def profile(request):
 
 
 def analytics_dashboard(request):
-    import json
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT COUNT(*) FROM leads WHERE deleted_at IS NULL")
-    kpi_total = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM leads WHERE junk_reason_id IS NULL AND deleted_at IS NULL")
-    kpi_clean = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM leads WHERE junk_reason_id IS NOT NULL AND deleted_at IS NULL")
-    kpi_junk = cursor.fetchone()[0]
-
-    cursor.execute("""SELECT s.label, COUNT(l.id) as count
-        FROM leads l JOIN sources s ON l.primary_source_id = s.id
-        WHERE l.deleted_at IS NULL GROUP BY s.label ORDER BY count DESC""")
-    leads_by_source = [{"source": r[0], "count": r[1]} for r in cursor.fetchall()]
-
-    cursor.execute("""SELECT s.label,
-        SUM(CASE WHEN l.junk_reason_id IS NOT NULL THEN 1 ELSE 0 END) as junk,
-        SUM(CASE WHEN l.junk_reason_id IS NULL THEN 1 ELSE 0 END) as clean
-        FROM leads l JOIN sources s ON l.primary_source_id = s.id
-        WHERE l.deleted_at IS NULL GROUP BY s.label""")
-    junk_by_source = [{"source": r[0], "junk": r[1], "clean": r[2]} for r in cursor.fetchall()]
-
-    cursor.execute("""SELECT u.name, COUNT(d.id),
-        SUM(CASE WHEN ps.terminal_type='won' THEN 1 ELSE 0 END),
-        SUM(CASE WHEN ps.terminal_type='lost' THEN 1 ELSE 0 END),
-        ROUND(100.0*SUM(CASE WHEN ps.terminal_type='won' THEN 1 ELSE 0 END)/COUNT(d.id),1),
-        ROUND(SUM(CASE WHEN ps.terminal_type='won' THEN d.won_value_minor ELSE 0 END)/100.0,0)
-        FROM deals d JOIN users u ON d.owner_id=u.id
-        JOIN pipeline_stages ps ON d.stage_id=ps.id
-        WHERE d.deleted_at IS NULL GROUP BY u.name ORDER BY 2 DESC""")
-    rep_performance = [{"rep": r[0], "deals": r[1], "won": r[2], "lost": r[3], "win_rate": r[4], "revenue": r[5]} for r in cursor.fetchall()]
-
-    cursor.execute("""SELECT lr.label, COUNT(d.id),
-        ROUND(SUM(COALESCE(d.expected_value_minor,0))/100.0,0)
-        FROM deals d JOIN lost_reasons lr ON d.lost_reason_id=lr.id
-        WHERE d.lost_reason_id IS NOT NULL GROUP BY lr.label ORDER BY 2 DESC""")
-    lost_reasons = [{"reason": r[0], "count": r[1], "value_sar": r[2]} for r in cursor.fetchall()]
-
-    cursor.execute("""SELECT s.label,
-        ROUND(AVG((julianday(a.occurred_at)-julianday(l.created_at))*24),1)
-        FROM activities a JOIN leads l ON a.entity_id=l.id AND a.entity_type='lead'
-        JOIN sources s ON l.primary_source_id=s.id
-        WHERE a.occurred_at>l.created_at AND l.deleted_at IS NULL
-        GROUP BY s.label ORDER BY 2 ASC""")
-    response_time = [{"source": r[0], "hours": r[1]} for r in cursor.fetchall()]
-
-    conn.close()
-    return render(request, "analytics.html", {
-        "kpi_total": kpi_total,
-        "kpi_clean": kpi_clean,
-        "kpi_junk": kpi_junk,
-        "leads_by_source_json": json.dumps(leads_by_source),
-        "junk_by_source_json": json.dumps(junk_by_source),
-        "rep_performance_json": json.dumps(rep_performance),
-        "lost_reasons_json": json.dumps(lost_reasons),
-        "response_time_json": json.dumps(response_time),
-    })
+    return render(request, "analytics.html", _analytics_context())
 
 
 def lead_scoring(request):

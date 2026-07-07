@@ -114,9 +114,9 @@
             const delta = adjustedDelta(task);
             const isPending = !task.is_completed && String(task.status || 'Pending').toLowerCase() !== 'completed';
             const isFutureDate = today && task.due_date && task.due_date > today;
-            const isRecentOverdue = delta < 0 && delta >= -OVERDUE_REMINDER_WINDOW_SECONDS && !isFutureDate;
-            const isDueTodaySoon = task.due_date === today && delta >= 0 && delta <= REMINDER_WINDOW_SECONDS;
-            const qualifies = isPending && task.due_at && (isRecentOverdue || isDueTodaySoon);
+            const isOverdue = delta < 0 && !isFutureDate && delta >= -OVERDUE_REMINDER_WINDOW_SECONDS;
+            const isDueTodaySoon = task.due_date === today && delta >= 60 && delta <= REMINDER_WINDOW_SECONDS;
+            const qualifies = isPending && task.due_at && (isOverdue || isDueTodaySoon);
             if (qualifies && !dismissedReminderIds.has(taskId)) byId.set(taskId, task);
         });
         return sortReminderTasks([...byId.values()]);
