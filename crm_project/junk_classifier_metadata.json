@@ -1,0 +1,18 @@
+{
+  "model_type": "RandomForestClassifier",
+  "n_estimators": 300,
+  "class_weight": "balanced",
+  "random_state": 42,
+  "features": ["source", "has_campaign", "has_quiz_answers", "matched_at_intake"],
+  "target": "is_junk",
+  "classes": [0, 1],
+  "class_labels": {"0": "clean", "1": "junk"},
+  "sources": ["Instagram", "Website", "Snapchat", "Employee Referral", "TikTok", "Partner Referral", "WhatsApp"],
+  "training_data": "crm.db — leads + lead_touchpoints + audit_log",
+  "preprocessing": "OneHotEncoder on source, passthrough on boolean features",
+  "test_accuracy": 0.667,
+  "train_accuracy": 0.656,
+  "threshold": 0.5,
+  "model_file": "junk_classifier.joblib",
+  "version": "1.0"
+}
