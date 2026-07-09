@@ -154,7 +154,7 @@ class Establishment(models.Model):
 
 class PipelineStage(models.Model):
     id = models.CharField(primary_key=True, max_length=255)
-    name = models.CharField(max_length=255, blank=True, null=True)
+    label = models.CharField(max_length=255, blank=True, null=True, db_column="label")
 
     class Meta:
         managed = False
@@ -163,7 +163,7 @@ class PipelineStage(models.Model):
 
 class ActivityType(models.Model):
     id = models.CharField(primary_key=True, max_length=255)
-    name = models.CharField(max_length=255, blank=True, null=True)
+    label = models.CharField(max_length=255, blank=True, null=True, db_column="label")
 
     class Meta:
         managed = False

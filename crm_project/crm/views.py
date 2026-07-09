@@ -15,7 +15,7 @@ from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.contrib.auth.password_validation import validate_password
 from django import forms
 from django.core.exceptions import ValidationError
-from django.db import models, transaction, IntegrityError
+from django.db import connection, models, transaction, IntegrityError
 from django.http import JsonResponse, HttpResponseForbidden
 from django.core.paginator import Paginator
 from django.shortcuts import redirect, render
@@ -73,7 +73,7 @@ def _clean_value(value):
 
 
 def _persist_record(table_name, action, record_id=None, fields=None):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     now = _now_iso()
 
@@ -128,7 +128,7 @@ def _handle_form_submission(request, table_name, list_name, allowed_fields):
 
 
 def fetch_latest_rows(table_name, limit=5):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(f"SELECT * FROM {table_name} ORDER BY rowid DESC LIMIT ?", (limit,))
@@ -247,7 +247,7 @@ def _get_reference_lookup(cursor, table_name):
 
 
 def _fetch_contact_details(contact):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -433,10 +433,46 @@ def _fetch_contact_details(contact):
     }
 
 
+class _SharedConnection:
+    """Adapter exposing the sqlite3-style cursor()/commit()/close() API but
+    backed by Django's own database connection. This ensures raw SQL shares the
+    ORM's connection, transaction and locking instead of opening a second handle
+    to the SQLite file (which previously risked "database is locked" errors and
+    made ORM writes invisible to raw reads and vice versa).
+
+    close() is intentionally a no-op: Django owns the connection lifecycle (it is
+    reset at the end of each request), so this code must never close it.
+    """
+
+    def cursor(self):
+        # Use Django's *underlying* sqlite3 connection rather than
+        # connection.cursor(). This still shares the ORM's connection,
+        # transaction and locking, but returns a native sqlite3 cursor, which:
+        #   * speaks "?" placeholders directly (all the raw SQL here uses "?",
+        #     not Django's "%s"), and
+        #   * skips Django's CursorDebugWrapper, whose last_executed_query() does
+        #     `sql % params` for query logging and crashes on "?"-style SQL (and
+        #     on literal "%" from e.g. strftime) whenever DEBUG is True.
+        connection.ensure_connection()
+        cur = connection.connection.cursor()
+        # Preserve the name-based access / dict(row) behaviour the raw SQL relies on.
+        cur.row_factory = sqlite3.Row
+        return cur
+
+    def commit(self):
+        # No-op: under Django's default autocommit each statement is already
+        # persisted, and inside a transaction.atomic() block (e.g. tests, or a
+        # caller-managed transaction) committing here is forbidden. Django owns
+        # the commit boundary in both cases.
+        pass
+
+    def close(self):
+        # No-op: never close Django's shared connection.
+        pass
+
+
 def _connect():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return _SharedConnection()
 
 
 def _display(value):
@@ -1655,25 +1691,37 @@ def tasks(request):
                 return redirect("tasks")
             now = _now_iso()
             conn = _connect()
-            cursor = conn.cursor()
-            _normalize_task_ids(cursor)
-            next_task_id = int(cursor.execute("SELECT COALESCE(MAX(rowid), 0) FROM tasks").fetchone()[0] or 0) + 1
-            conn.commit()
-            conn.close()
-            Task.objects.create(
-                id=str(next_task_id),
-                title=title,
-                description=description or None,
-                assignee_id=assignee_id or None,
-                due_at=due_at or None,
-                mode=priority or None,
-                outcome=status or None,
-                completed_at=now if status.lower() == "completed" else None,
-                entity_type=entity_type or None,
-                entity_id=entity_id or None,
-                created_at=now,
-                updated_at=now,
-            )
+            try:
+                cursor = conn.cursor()
+                _normalize_task_ids(cursor)
+                # Insert in a single statement and let SQLite assign the rowid
+                # atomically, then mirror it into the (integer-string) id column.
+                # This removes the previous read-then-insert race across two
+                # connections, where MAX(rowid)+1 was computed separately from
+                # the insert and could yield duplicate ids under concurrency.
+                cursor.execute(
+                    "INSERT INTO tasks (title, description, assignee_id, due_at, mode, "
+                    "outcome, completed_at, entity_type, entity_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        title,
+                        description or None,
+                        assignee_id or None,
+                        due_at or None,
+                        priority or None,
+                        status or None,
+                        now if status.lower() == "completed" else None,
+                        entity_type or None,
+                        entity_id or None,
+                        now,
+                        now,
+                    ),
+                )
+                new_id = cursor.lastrowid
+                cursor.execute("UPDATE tasks SET id = ? WHERE rowid = ?", (new_id, new_id))
+                conn.commit()
+            finally:
+                conn.close()
             messages.success(request, "Task created successfully.")
             return redirect("tasks")
 
@@ -2014,7 +2062,7 @@ def _build_context_for_template(view_func):
 
 def dashboard_api(request):
     """API endpoint returning dashboard data as JSON."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
 
     cursor = conn.cursor()
@@ -2887,7 +2935,7 @@ def tickets_api(request):
     sort_field = (request.GET.get("sort") or "created_at").strip()
     sort_order = (request.GET.get("order") or "desc").strip().lower()
     page_number = request.GET.get("page", 1)
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -2934,7 +2982,7 @@ def tickets_api(request):
 
 
 def _analytics_context():
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     cursor.execute("SELECT COUNT(*) FROM leads WHERE deleted_at IS NULL")
@@ -3009,7 +3057,7 @@ def contacts_api(request):
     """API endpoint returning contacts data as JSON."""
     query = (request.GET.get("q") or "").strip()
     page_number = request.GET.get("page", 1)
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -3174,7 +3222,7 @@ def ticket_detail(request, record_id):
 def contacts(request):
     query = (request.GET.get("q") or "").strip()
     page_number = request.GET.get("page", 1)
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -3208,7 +3256,7 @@ def contacts(request):
 
 
 def dashboard(request):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
 
     cursor = conn.cursor()
@@ -3336,33 +3384,64 @@ def lead_scoring(request):
     return render(request, "lead_scoring.html", {})
 
 
+# Path to the trained junk classifier. Place junk_classifier.joblib next to
+# manage.py (crm_project/junk_classifier.joblib) to enable ML-based scoring.
+JUNK_MODEL_PATH = Path(__file__).resolve().parent.parent / "junk_classifier.joblib"
+
+# Cache the loaded model so it is read from disk only once per process.
+# Sentinel _UNSET means "not loaded yet"; None means "unavailable, use fallback".
+_junk_model = "_UNSET"
+
+
+def _load_junk_model():
+    """Load and cache the junk classifier, or return None if unavailable."""
+    global _junk_model
+    if _junk_model == "_UNSET":
+        try:
+            import joblib
+
+            _junk_model = joblib.load(JUNK_MODEL_PATH)
+        except Exception:
+            # Missing file, missing deps, or incompatible pickle: fall back
+            # to the rule-based estimate so the page keeps working.
+            _junk_model = None
+    return _junk_model
+
+
 def predict_lead(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST only"}, status=405)
+
+    model = _load_junk_model()
+    if model is None:
+        # The trained model is the only source of predictions. If it cannot be
+        # loaded there is no fallback scoring -- report the error instead.
+        return JsonResponse({"error": "Model not available"}, status=503)
+
+    import pandas as pd
+
     data = json.loads(request.body)
-    source = data.get("source", "Instagram")
-    has_campaign = bool(data.get("has_campaign", False))
-    has_quiz_answers = bool(data.get("has_quiz_answers", False))
-    matched_at_intake = bool(data.get("matched_at_intake", False))
-    source_junk_rates = {
-        "Instagram": 0.805,
-        "Website": 0.750,
-        "TikTok": 0.667,
-        "Snapchat": 0.388,
-        "Partner Referral": 0.000,
-        "Employee Referral": 0.000,
-    }
-    base = source_junk_rates.get(source, 0.5)
-    if matched_at_intake:
-        base *= 0.2
-    if has_campaign:
-        base *= 0.9
-    if has_quiz_answers:
-        base *= 0.85
-    p_junk = round(min(base, 1.0), 3)
-    p_clean = round(1.0 - p_junk, 3)
-    is_junk = p_junk >= 0.5
-    return JsonResponse({"is_junk": is_junk, "p_junk": p_junk, "p_clean": p_clean})
+    row = pd.DataFrame([{
+        "source": data.get("source", "Instagram"),
+        "has_campaign": bool(data.get("has_campaign", False)),
+        "has_quiz_answers": bool(data.get("has_quiz_answers", False)),
+        "matched_at_intake": bool(data.get("matched_at_intake", False)),
+        "has_phone": bool(data.get("has_phone", True)),
+        "has_email": bool(data.get("has_email", False)),
+        "activity_count": int(data.get("activity_count", 0)),
+        "is_organic": bool(data.get("is_organic", True)),
+    }])
+
+    proba = model.predict_proba(row)[0]
+    p_junk = round(float(proba[1]), 3)
+    p_clean = round(float(proba[0]), 3)
+    is_junk = bool(model.predict(row)[0])
+    return JsonResponse({
+        "is_junk": is_junk,
+        "p_junk": p_junk,
+        "p_clean": p_clean,
+        "model": "ml",
+    })
 
 
 def auth_portal(request):

@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test import TestCase
@@ -17,34 +18,32 @@ class CRMPageTests(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        existing_tables = connection.introspection.table_names()
-        if Task._meta.db_table not in existing_tables:
-            with connection.cursor() as cursor:
+        # The crm.* models are managed=False, so Django does not create their
+        # tables in the test database. Raw SQL in the views now runs through
+        # Django's connection (the test DB), so create every crm table here from
+        # the model definitions to keep the suite hermetic instead of leaking
+        # onto the real crm.db. Plain DDL is used (rather than schema_editor,
+        # which SQLite refuses to run inside the test's atomic transaction).
+        type_map = {
+            "TextField": "text",
+            "IntegerField": "integer",
+            "BigIntegerField": "integer",
+            "BooleanField": "bool",
+            "DateTimeField": "datetime",
+            "DateField": "date",
+        }
+        with connection.cursor() as cursor:
+            for model in apps.get_app_config("crm").get_models():
+                columns = []
+                for field in model._meta.fields:
+                    sql_type = type_map.get(type(field).__name__, "varchar(255)")
+                    column = f'"{field.column}" {sql_type}'
+                    if field.primary_key:
+                        column += " PRIMARY KEY"
+                    columns.append(column)
                 cursor.execute(
-                    """
-                    CREATE TABLE tasks (
-                        id varchar(255) PRIMARY KEY,
-                        entity_type varchar(255),
-                        entity_id varchar(255),
-                        task_type_id varchar(255),
-                        task_type_option_id varchar(255),
-                        title varchar(255),
-                        description text,
-                        mode varchar(255),
-                        location varchar(255),
-                        meeting_url varchar(255),
-                        assignee_id varchar(255),
-                        due_at varchar(255),
-                        completed_at varchar(255),
-                        outcome varchar(255),
-                        google_event_id varchar(255),
-                        google_meet_url varchar(255),
-                        calendar_sync_status varchar(255),
-                        calendar_sync_error varchar(255),
-                        created_at varchar(255),
-                        updated_at varchar(255)
-                    )
-                    """
+                    f'CREATE TABLE IF NOT EXISTS "{model._meta.db_table}" '
+                    f'({", ".join(columns)})'
                 )
 
     def setUp(self):
