@@ -17,7 +17,7 @@
   "recall": 0.8253,
   "f1": 0.5627,
   "evaluated_on": "795 leads (269 junk / 526 clean) from crm.db",
-  "metrics_note": "Metrics were computed by evaluating the shipped junk_classifier.joblib against crm.db with reconstructed features (has_quiz_answers / matched_at_intake derived heuristically). train/test are an 80/20 stratified split (random_state=42) of the current data used only for evaluation, not the model's original training split.",
+  "metrics_note": "Metrics computed by evaluating junk_classifier.joblib against crm.db (795 leads) using the model author's exact feature derivation: has_campaign / has_quiz_answers parsed from touchpoint raw_payload, matched_at_intake from system-ingested (actor_id IS NULL) create audit events, source label or 'none'. train/test are an 80/20 stratified split (random_state=42) used only for evaluation, not the model's original training split. Accuracy is unchanged from the previous heuristic derivation (the model's output is dominated by source), so these features match the intended methodology without raising the score on this data.",
   "threshold": 0.5,
   "model_file": "junk_classifier.joblib",
   "version": "1.0"

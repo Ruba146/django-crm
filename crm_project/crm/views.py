@@ -3415,6 +3415,14 @@ def _load_junk_model():
     return _junk_model
 
 
+# Exact intake-quiz question keys the model author used to derive
+# has_quiz_answers (presence of either key in the touchpoint payload).
+_QUIZ_KEYS = (
+    "هل_عندك_فواتير_ضريبية؟",
+    "هل_تعاني_من_الإجراء_المحاسبي_والضريبي_في_منشأتك؟",
+)
+
+
 def _ml_lead_scores(cursor, lead_dicts):
     """Score leads with the trained junk model for the leads list UI.
 
@@ -3436,32 +3444,42 @@ def _ml_lead_scores(cursor, lead_dicts):
     import pandas as pd
 
     source_lookup = _safe_lookup(cursor, "sources")
-    campaign_ids = {
-        row[0]
-        for row in cursor.execute(
-            "SELECT DISTINCT lead_id FROM lead_touchpoints WHERE campaign_id IS NOT NULL"
-        )
-    }
-    # Arabic quiz question keys (e.g. "هل ...") are stored ASCII-escaped in the
-    # touchpoint payload as هل, so match that literal sequence.
-    quiz_ids = {
-        row[0]
-        for row in cursor.execute(
-            "SELECT DISTINCT lead_id FROM lead_touchpoints WHERE raw_payload LIKE ?",
-            ("%\\u0647\\u0644%",),
-        )
-    }
-    # An establishment linked at creation time means the lead matched an existing
-    # record at intake.
-    matched_ids = {
-        row[0]
-        for row in cursor.execute(
-            "SELECT DISTINCT entity_id FROM audit_log "
-            "WHERE entity_type = 'lead' AND action = 'create' "
-            "AND after LIKE '%establishmentId%' "
-            "AND after NOT LIKE '%\"establishmentId\": null%'"
-        )
-    }
+
+    # has_campaign / has_quiz_answers are derived from the parsed touchpoint
+    # payloads, matching the model author's original methodology: a campaign is
+    # any non-empty campaign_id other than "--", and quiz answers are the
+    # presence of either exact quiz question key in the payload.
+    campaign_ids, quiz_ids = set(), set()
+    cursor.execute(
+        "SELECT lead_id, raw_payload FROM lead_touchpoints WHERE raw_payload IS NOT NULL"
+    )
+    for lead_id, raw_payload in cursor.fetchall():
+        try:
+            payload = json.loads(raw_payload)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        cid = payload.get("campaign_id") or ""
+        if cid and cid not in ("--", ""):
+            campaign_ids.add(lead_id)
+        if any(key in payload for key in _QUIZ_KEYS):
+            quiz_ids.add(lead_id)
+
+    # matched_at_intake: an establishment was linked in the system-ingested
+    # create event (actor_id IS NULL means automated ingestion, not a human rep).
+    matched_ids = set()
+    cursor.execute(
+        "SELECT entity_id, after FROM audit_log "
+        "WHERE entity_type = 'lead' AND action = 'create' "
+        "AND actor_id IS NULL AND after IS NOT NULL"
+    )
+    for entity_id, after in cursor.fetchall():
+        try:
+            if json.loads(after).get("establishmentId") is not None:
+                matched_ids.add(entity_id)
+        except (TypeError, ValueError):
+            continue
 
     ids, rows = [], []
     for lead in lead_dicts:
@@ -3469,10 +3487,10 @@ def _ml_lead_scores(cursor, lead_dicts):
         ids.append(lead_id)
         rows.append(
             {
-                "source": source_lookup.get(str(lead.get("primary_source_id"))) or "Unknown",
                 "has_campaign": lead_id in campaign_ids,
                 "has_quiz_answers": lead_id in quiz_ids,
                 "matched_at_intake": lead_id in matched_ids,
+                "source": source_lookup.get(str(lead.get("primary_source_id"))) or "none",
             }
         )
 
@@ -3510,15 +3528,12 @@ def predict_lead(request):
     import pandas as pd
 
     data = json.loads(request.body)
+    # The model was trained on exactly these four features.
     row = pd.DataFrame([{
-        "source": data.get("source", "Instagram"),
         "has_campaign": bool(data.get("has_campaign", False)),
         "has_quiz_answers": bool(data.get("has_quiz_answers", False)),
         "matched_at_intake": bool(data.get("matched_at_intake", False)),
-        "has_phone": bool(data.get("has_phone", True)),
-        "has_email": bool(data.get("has_email", False)),
-        "activity_count": int(data.get("activity_count", 0)),
-        "is_organic": bool(data.get("is_organic", True)),
+        "source": data.get("source") or "none",
     }])
 
     proba = model.predict_proba(row)[0]
