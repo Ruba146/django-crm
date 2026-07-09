@@ -30,7 +30,7 @@ from .access import (
     has_permission,
 )
 from .ai_scoring import AIScoringService
-from .models import Task
+from .models import Contact, Deal, Lead, Task
 
 DB_PATH = Path(__file__).resolve().parent.parent / "crm.db"
 
@@ -736,18 +736,19 @@ def leads(request):
     conn = _connect()
     cursor = conn.cursor()
 
-    sql = "SELECT * FROM leads WHERE deleted_at IS NULL"
-    params = []
-    if query:
-        search_term = f"%{query}%"
-        sql += " AND (full_name LIKE ? OR notes LIKE ? OR custom_fields LIKE ?)"
-        params.extend([search_term, search_term, search_term])
-
     allowed_sort_fields = {"created_at": "created_at", "full_name": "full_name", "stage_id": "stage_id", "updated_at": "updated_at"}
     sort_column = allowed_sort_fields.get(sort_field, "created_at")
-    sql += f" ORDER BY {sort_column} {'ASC' if sort_order == 'asc' else 'DESC'}, rowid DESC"
-    cursor.execute(sql, params)
-    lead_rows = cursor.fetchall()
+    # ORM: single-table list query. The old raw SQL added a "rowid DESC" tiebreak
+    # which has no ORM equivalent; ordering is otherwise identical.
+    lead_qs = Lead.objects.filter(deleted_at__isnull=True)
+    if query:
+        lead_qs = lead_qs.filter(
+            models.Q(full_name__icontains=query)
+            | models.Q(notes__icontains=query)
+            | models.Q(custom_fields__icontains=query)
+        )
+    order_prefix = "" if sort_order == "asc" else "-"
+    lead_rows = list(lead_qs.order_by(f"{order_prefix}{sort_column}").values())
 
     stage_lookup = _safe_lookup(cursor, "pipeline_stages")
     company_lookup = _safe_lookup(cursor, "establishments")
@@ -755,12 +756,13 @@ def leads(request):
     if not owner_lookup:
         owner_lookup = _safe_lookup(cursor, "employees")
 
+    lead_dicts = [dict(lead) for lead in lead_rows]
+    ml_scores = _ml_lead_scores(cursor, lead_dicts)
+
     lead_list = []
-    for lead in lead_rows:
-        lead_dict = dict(lead)
+    for lead_dict in lead_dicts:
         stage_name = _display(stage_lookup.get(str(lead_dict.get("stage_id"))))
-        ai_payload = AIScoringService.build_payload(cursor, "lead", lead_dict.get("id"), stage_history=[stage_name] if stage_name and stage_name != "-" else None)
-        ai_score = AIScoringService.score(ai_payload)
+        score = ml_scores.get(lead_dict.get("id")) or {"score": "-", "confidence": "-", "reasons": []}
         lead_list.append({
             "row": lead_dict,
             "details": {
@@ -773,9 +775,9 @@ def leads(request):
                 "value": _display(_extract_custom_value(lead_dict.get("custom_fields")) or lead_dict.get("value")),
                 "owner": _display(owner_lookup.get(str(lead_dict.get("owner_id"))) or lead_dict.get("owner_id")),
                 "notes": _display(lead_dict.get("notes")),
-                "ai_score": f"{ai_score['score']}%",
-                "ai_confidence": ai_score["confidence"],
-                "ai_reasons": ai_score["reasons"],
+                "ai_score": score["score"],
+                "ai_confidence": score["confidence"],
+                "ai_reasons": score["reasons"],
             },
         })
 
@@ -810,12 +812,11 @@ def deals(request):
     conn = _connect()
     cursor = conn.cursor()
 
-    sql = "SELECT * FROM deals WHERE deleted_at IS NULL"
-    params = []
-
-    sql += " ORDER BY created_at DESC, rowid DESC"
-    cursor.execute(sql, params)
-    deal_rows = cursor.fetchall()
+    # ORM: single-table list query. The old raw SQL added a "rowid DESC" tiebreak
+    # which has no ORM equivalent; ordering is otherwise identical.
+    deal_rows = list(
+        Deal.objects.filter(deleted_at__isnull=True).order_by("-created_at").values()
+    )
 
     stage_lookup = _safe_lookup(cursor, "pipeline_stages")
     company_lookup = _safe_lookup(cursor, "establishments")
@@ -2158,18 +2159,19 @@ def leads_api(request):
     conn = _connect()
     cursor = conn.cursor()
 
-    sql = "SELECT * FROM leads WHERE deleted_at IS NULL"
-    params = []
-    if query:
-        search_term = f"%{query}%"
-        sql += " AND (full_name LIKE ? OR notes LIKE ? OR custom_fields LIKE ?)"
-        params.extend([search_term, search_term, search_term])
-
     allowed_sort_fields = {"created_at": "created_at", "full_name": "full_name", "stage_id": "stage_id", "updated_at": "updated_at"}
     sort_column = allowed_sort_fields.get(sort_field, "created_at")
-    sql += f" ORDER BY {sort_column} {'ASC' if sort_order == 'asc' else 'DESC'}, rowid DESC"
-    cursor.execute(sql, params)
-    lead_rows = cursor.fetchall()
+    # ORM: single-table list query. The old raw SQL added a "rowid DESC" tiebreak
+    # which has no ORM equivalent; ordering is otherwise identical.
+    lead_qs = Lead.objects.filter(deleted_at__isnull=True)
+    if query:
+        lead_qs = lead_qs.filter(
+            models.Q(full_name__icontains=query)
+            | models.Q(notes__icontains=query)
+            | models.Q(custom_fields__icontains=query)
+        )
+    order_prefix = "" if sort_order == "asc" else "-"
+    lead_rows = list(lead_qs.order_by(f"{order_prefix}{sort_column}").values())
 
     stage_lookup = _safe_lookup(cursor, "pipeline_stages")
     company_lookup = _safe_lookup(cursor, "establishments")
@@ -2177,12 +2179,13 @@ def leads_api(request):
     if not owner_lookup:
         owner_lookup = _safe_lookup(cursor, "employees")
 
+    lead_dicts = [dict(lead) for lead in lead_rows]
+    ml_scores = _ml_lead_scores(cursor, lead_dicts)
+
     lead_list = []
-    for lead in lead_rows:
-        lead_dict = dict(lead)
+    for lead_dict in lead_dicts:
         stage_name = _display(stage_lookup.get(str(lead_dict.get("stage_id"))))
-        ai_payload = AIScoringService.build_payload(cursor, "lead", lead_dict.get("id"), stage_history=[stage_name] if stage_name and stage_name != "-" else None)
-        ai_score = AIScoringService.score(ai_payload)
+        score = ml_scores.get(lead_dict.get("id")) or {"score": "-", "confidence": "-", "reasons": []}
         lead_list.append({
             "row": lead_dict,
             "details": {
@@ -2195,9 +2198,9 @@ def leads_api(request):
                 "value": _display(_extract_custom_value(lead_dict.get("custom_fields")) or lead_dict.get("value")),
                 "owner": _display(owner_lookup.get(str(lead_dict.get("owner_id"))) or lead_dict.get("owner_id")),
                 "notes": _display(lead_dict.get("notes")),
-                "ai_score": f"{ai_score['score']}%",
-                "ai_confidence": ai_score["confidence"],
-                "ai_reasons": ai_score["reasons"],
+                "ai_score": score["score"],
+                "ai_confidence": score["confidence"],
+                "ai_reasons": score["reasons"],
             },
         })
 
@@ -2225,12 +2228,11 @@ def deals_api(request):
     conn = _connect()
     cursor = conn.cursor()
 
-    sql = "SELECT * FROM deals WHERE deleted_at IS NULL"
-    params = []
-
-    sql += " ORDER BY created_at DESC, rowid DESC"
-    cursor.execute(sql, params)
-    deal_rows = cursor.fetchall()
+    # ORM: single-table list query. The old raw SQL added a "rowid DESC" tiebreak
+    # which has no ORM equivalent; ordering is otherwise identical.
+    deal_rows = list(
+        Deal.objects.filter(deleted_at__isnull=True).order_by("-created_at").values()
+    )
 
     stage_lookup = _safe_lookup(cursor, "pipeline_stages")
     company_lookup = _safe_lookup(cursor, "establishments")
@@ -3061,16 +3063,18 @@ def contacts_api(request):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    sql = "SELECT * FROM contacts WHERE deleted_at IS NULL"
-    params = []
+    # ORM: single-table list query. The old raw SQL added a "rowid DESC" tiebreak
+    # which has no ORM equivalent; ordering is otherwise identical.
+    contact_qs = Contact.objects.filter(deleted_at__isnull=True)
     if query:
-        search_term = f"%{query}%"
-        sql += " AND (full_name LIKE ? OR role LIKE ? OR phone LIKE ? OR email LIKE ? OR notes LIKE ?)"
-        params.extend([search_term, search_term, search_term, search_term, search_term])
-
-    sql += " ORDER BY created_at DESC, rowid DESC"
-    cursor.execute(sql, params)
-    contacts_rows = cursor.fetchall()
+        contact_qs = contact_qs.filter(
+            models.Q(full_name__icontains=query)
+            | models.Q(role__icontains=query)
+            | models.Q(phone__icontains=query)
+            | models.Q(email__icontains=query)
+            | models.Q(notes__icontains=query)
+        )
+    contacts_rows = list(contact_qs.order_by("-created_at").values())
     contact_list = []
     for contact in contacts_rows:
         contact_list.append({
@@ -3226,16 +3230,18 @@ def contacts(request):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    sql = "SELECT * FROM contacts WHERE deleted_at IS NULL"
-    params = []
+    # ORM: single-table list query. The old raw SQL added a "rowid DESC" tiebreak
+    # which has no ORM equivalent; ordering is otherwise identical.
+    contact_qs = Contact.objects.filter(deleted_at__isnull=True)
     if query:
-        search_term = f"%{query}%"
-        sql += " AND (full_name LIKE ? OR role LIKE ? OR phone LIKE ? OR email LIKE ? OR notes LIKE ?)"
-        params.extend([search_term, search_term, search_term, search_term, search_term])
-
-    sql += " ORDER BY created_at DESC, rowid DESC"
-    cursor.execute(sql, params)
-    contacts_rows = cursor.fetchall()
+        contact_qs = contact_qs.filter(
+            models.Q(full_name__icontains=query)
+            | models.Q(role__icontains=query)
+            | models.Q(phone__icontains=query)
+            | models.Q(email__icontains=query)
+            | models.Q(notes__icontains=query)
+        )
+    contacts_rows = list(contact_qs.order_by("-created_at").values())
     contact_list = []
     for contact in contacts_rows:
         contact_list.append({
@@ -3389,7 +3395,7 @@ def lead_scoring(request):
 JUNK_MODEL_PATH = Path(__file__).resolve().parent.parent / "junk_classifier.joblib"
 
 # Cache the loaded model so it is read from disk only once per process.
-# Sentinel _UNSET means "not loaded yet"; None means "unavailable, use fallback".
+# Sentinel _UNSET means "not loaded yet"; None means "unavailable".
 _junk_model = "_UNSET"
 
 
@@ -3402,10 +3408,93 @@ def _load_junk_model():
 
             _junk_model = joblib.load(JUNK_MODEL_PATH)
         except Exception:
-            # Missing file, missing deps, or incompatible pickle: fall back
-            # to the rule-based estimate so the page keeps working.
+            # Missing file, missing deps, or incompatible pickle: leave the
+            # model unavailable so predict_lead() returns an explicit error
+            # (there is no rule-based fallback).
             _junk_model = None
     return _junk_model
+
+
+def _ml_lead_scores(cursor, lead_dicts):
+    """Score leads with the trained junk model for the leads list UI.
+
+    Returns ``{lead_id: {"score", "confidence", "reasons"}}`` where ``score`` is
+    ``round(p_clean * 100)`` rendered as ``"<n>%"``, or ``"-"`` for every lead
+    when the model is unavailable. Features are derived in bulk (a handful of set
+    lookups) so the whole page costs a single predict_proba call instead of one
+    per lead.
+    """
+    if not lead_dicts:
+        return {}
+    model = _load_junk_model()
+    if model is None:
+        return {
+            lead.get("id"): {"score": "-", "confidence": "-", "reasons": []}
+            for lead in lead_dicts
+        }
+
+    import pandas as pd
+
+    source_lookup = _safe_lookup(cursor, "sources")
+    campaign_ids = {
+        row[0]
+        for row in cursor.execute(
+            "SELECT DISTINCT lead_id FROM lead_touchpoints WHERE campaign_id IS NOT NULL"
+        )
+    }
+    # Arabic quiz question keys (e.g. "هل ...") are stored ASCII-escaped in the
+    # touchpoint payload as هل, so match that literal sequence.
+    quiz_ids = {
+        row[0]
+        for row in cursor.execute(
+            "SELECT DISTINCT lead_id FROM lead_touchpoints WHERE raw_payload LIKE ?",
+            ("%\\u0647\\u0644%",),
+        )
+    }
+    # An establishment linked at creation time means the lead matched an existing
+    # record at intake.
+    matched_ids = {
+        row[0]
+        for row in cursor.execute(
+            "SELECT DISTINCT entity_id FROM audit_log "
+            "WHERE entity_type = 'lead' AND action = 'create' "
+            "AND after LIKE '%establishmentId%' "
+            "AND after NOT LIKE '%\"establishmentId\": null%'"
+        )
+    }
+
+    ids, rows = [], []
+    for lead in lead_dicts:
+        lead_id = lead.get("id")
+        ids.append(lead_id)
+        rows.append(
+            {
+                "source": source_lookup.get(str(lead.get("primary_source_id"))) or "Unknown",
+                "has_campaign": lead_id in campaign_ids,
+                "has_quiz_answers": lead_id in quiz_ids,
+                "matched_at_intake": lead_id in matched_ids,
+            }
+        )
+
+    proba = model.predict_proba(pd.DataFrame(rows))
+    scores = {}
+    for lead_id, features, prob in zip(ids, rows, proba):
+        p_clean = float(prob[0])  # class 0 = clean, class 1 = junk
+        margin = abs(p_clean - 0.5) * 2
+        confidence = "High" if margin >= 0.6 else "Medium" if margin >= 0.3 else "Low"
+        reasons = [f"Source: {features['source']}"]
+        if features["has_campaign"]:
+            reasons.append("Linked to a campaign")
+        if features["has_quiz_answers"]:
+            reasons.append("Completed intake quiz")
+        if features["matched_at_intake"]:
+            reasons.append("Matched an establishment at intake")
+        scores[lead_id] = {
+            "score": f"{round(p_clean * 100)}%",
+            "confidence": confidence,
+            "reasons": reasons,
+        }
+    return scores
 
 
 def predict_lead(request):
