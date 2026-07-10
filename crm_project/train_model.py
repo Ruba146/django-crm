@@ -1,40 +1,43 @@
+# -*- coding: utf-8 -*-
 """Train the lead junk classifier from the CRM database.
 
-Reads leads from ``crm.db``, derives the four features the model uses
-(``source``, ``has_campaign``, ``has_quiz_answers``, ``matched_at_intake``),
-trains a RandomForest, saves it to ``junk_classifier.joblib`` and prints
-evaluation metrics.
+Reproduces the model author's methodology:
+
+* Features (exactly four):
+    - source            : sources.label via leads.primary_source_id, else "none"
+    - has_campaign      : touchpoint raw_payload has a campaign_id that is
+                          non-empty and not "--"
+    - has_quiz_answers  : touchpoint raw_payload contains either exact intake
+                          quiz question key
+    - matched_at_intake : the system-ingested create audit event
+                          (actor_id IS NULL) linked a non-null establishmentId
+* Label: is_junk = leads.junk_reason_id IS NOT NULL
+* Exclusions (rows dropped before training):
+    - leads in a stage with terminal_type = 'bot'
+    - leads in the 'Junk' stage with junk_reason_id IS NULL
+* Model: RandomForestClassifier(n_estimators=300, class_weight='balanced',
+  random_state=42) with OneHotEncoder on source, passthrough on the booleans.
 
 Run from the crm_project/ directory:
 
     ../.venv/Scripts/python.exe train_model.py
-
-NOTE ON FEATURE DERIVATION
---------------------------
-The original training pipeline is not available in this repo, so the SQL below
-is a best-effort reconstruction of the four features from the current schema.
-Review these definitions against how the shipped model was trained before you
-rely on a retrained model:
-
-* source            -> sources.label joined via leads.primary_source_id
-* has_campaign      -> the lead has a touchpoint carrying a campaign_id
-* has_quiz_answers  -> a touchpoint raw_payload mentions quiz/question/answer data
-* matched_at_intake -> the lead was linked to a known referrer at intake
-* label (is_junk)   -> leads.junk_reason_id IS NOT NULL
 """
 
+import json
+import sqlite3
 from pathlib import Path
 
 import joblib
 import pandas as pd
-import sqlite3
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
     confusion_matrix,
-    roc_auc_score,
+    f1_score,
+    precision_score,
+    recall_score,
 )
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
@@ -44,47 +47,77 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "crm.db"
 MODEL_PATH = BASE_DIR / "junk_classifier.joblib"
 
-FEATURE_QUERY = """
-SELECT
-    COALESCE(s.label, 'Unknown') AS source,
-    CASE WHEN EXISTS (
-        SELECT 1 FROM lead_touchpoints tp
-        WHERE tp.lead_id = l.id AND tp.campaign_id IS NOT NULL
-    ) THEN 1 ELSE 0 END AS has_campaign,
-    CASE WHEN EXISTS (
-        SELECT 1 FROM lead_touchpoints tp
-        WHERE tp.lead_id = l.id
-          AND tp.raw_payload IS NOT NULL
-          AND (
-              tp.raw_payload LIKE '%answer%'
-              OR tp.raw_payload LIKE '%question%'
-              OR tp.raw_payload LIKE '%quiz%'
-          )
-    ) THEN 1 ELSE 0 END AS has_quiz_answers,
-    CASE WHEN (
-        l.referrer_contact_id IS NOT NULL
-        OR l.referrer_employee_id IS NOT NULL
-    ) THEN 1 ELSE 0 END AS matched_at_intake,
-    CASE WHEN l.junk_reason_id IS NOT NULL THEN 1 ELSE 0 END AS is_junk
-FROM leads l
-LEFT JOIN sources s ON s.id = l.primary_source_id
-WHERE l.deleted_at IS NULL
-"""
-
+QUIZ_KEYS = (
+    "هل_عندك_فواتير_ضريبية؟",
+    "هل_تعاني_من_الإجراء_المحاسبي_والضريبي_في_منشأتك؟",
+)
 BOOLEAN_FEATURES = ["has_campaign", "has_quiz_answers", "matched_at_intake"]
 CATEGORICAL_FEATURES = ["source"]
-FEATURE_COLUMNS = CATEGORICAL_FEATURES + BOOLEAN_FEATURES
+FEATURE_COLUMNS = BOOLEAN_FEATURES + CATEGORICAL_FEATURES
 
 
 def load_dataset():
+    """Return (features_frame, labels, exclusion_counts) from crm.db."""
     if not DB_PATH.exists():
         raise SystemExit(f"Database not found: {DB_PATH}")
-    with sqlite3.connect(DB_PATH) as conn:
-        frame = pd.read_sql_query(FEATURE_QUERY, conn)
-    # Match the dtypes the served model expects: booleans, not 0/1 ints.
-    for column in BOOLEAN_FEATURES:
-        frame[column] = frame[column].astype(bool)
-    return frame
+    conn = sqlite3.connect(DB_PATH)
+
+    source_label = dict(conn.execute("SELECT id, label FROM sources"))
+    bot_stages = {r[0] for r in conn.execute(
+        "SELECT id FROM pipeline_stages WHERE terminal_type = 'bot'")}
+    junk_stages = {r[0] for r in conn.execute(
+        "SELECT id FROM pipeline_stages WHERE label = 'Junk'")}
+
+    has_campaign, has_quiz = {}, {}
+    for lead_id, payload in conn.execute(
+        "SELECT lead_id, raw_payload FROM lead_touchpoints WHERE raw_payload IS NOT NULL"
+    ):
+        try:
+            data = json.loads(payload)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        cid = data.get("campaign_id") or ""
+        if cid and cid not in ("--", ""):
+            has_campaign[lead_id] = True
+        if any(key in data for key in QUIZ_KEYS):
+            has_quiz[lead_id] = True
+
+    matched = set()
+    for entity_id, after in conn.execute(
+        "SELECT entity_id, after FROM audit_log "
+        "WHERE entity_type = 'lead' AND action = 'create' "
+        "AND actor_id IS NULL AND after IS NOT NULL"
+    ):
+        try:
+            if json.loads(after).get("establishmentId") is not None:
+                matched.add(entity_id)
+        except (TypeError, ValueError):
+            continue
+
+    rows, labels = [], []
+    excluded = {"bot": 0, "junk_no_reason": 0}
+    for lead_id, source_id, stage_id, junk_reason in conn.execute(
+        "SELECT id, primary_source_id, stage_id, junk_reason_id "
+        "FROM leads WHERE deleted_at IS NULL"
+    ):
+        if stage_id in bot_stages:
+            excluded["bot"] += 1
+            continue
+        if stage_id in junk_stages and junk_reason is None:
+            excluded["junk_no_reason"] += 1
+            continue
+        rows.append({
+            "has_campaign": bool(has_campaign.get(lead_id)),
+            "has_quiz_answers": bool(has_quiz.get(lead_id)),
+            "matched_at_intake": lead_id in matched,
+            "source": source_label.get(source_id) or "none",
+        })
+        labels.append(1 if junk_reason is not None else 0)
+
+    conn.close()
+    return pd.DataFrame(rows, columns=FEATURE_COLUMNS), pd.Series(labels, name="is_junk"), excluded
 
 
 def build_pipeline():
@@ -103,14 +136,11 @@ def build_pipeline():
 
 
 def main():
-    frame = load_dataset()
-    print(f"Loaded {len(frame)} leads from {DB_PATH.name}")
-    print("Label balance (is_junk):")
-    print(frame["is_junk"].value_counts().rename({0: "clean", 1: "junk"}).to_string())
-    print()
-
-    features = frame[FEATURE_COLUMNS]
-    target = frame["is_junk"]
+    features, target, excluded = load_dataset()
+    print(f"Excluded — terminal_type=bot: {excluded['bot']}, "
+          f"Junk stage & no reason: {excluded['junk_no_reason']}")
+    print(f"Training rows: {len(features)} "
+          f"(junk={int(target.sum())}, clean={int((target == 0).sum())})")
 
     X_train, X_test, y_train, y_test = train_test_split(
         features, target, test_size=0.2, stratify=target, random_state=42
@@ -120,12 +150,12 @@ def main():
     pipeline.fit(X_train, y_train)
 
     predictions = pipeline.predict(X_test)
-    probabilities = pipeline.predict_proba(X_test)[:, 1]
-
-    print(f"Accuracy : {accuracy_score(y_test, predictions):.4f}")
-    print(f"ROC-AUC  : {roc_auc_score(y_test, probabilities):.4f}")
-    print()
-    print("Classification report:")
+    print(f"\nTrain accuracy: {accuracy_score(y_train, pipeline.predict(X_train)):.4f}")
+    print(f"Test  accuracy: {accuracy_score(y_test, predictions):.4f}")
+    print(f"Precision: {precision_score(y_test, predictions):.4f}")
+    print(f"Recall   : {recall_score(y_test, predictions):.4f}")
+    print(f"F1       : {f1_score(y_test, predictions):.4f}")
+    print("\nClassification report:")
     print(classification_report(y_test, predictions, target_names=["clean", "junk"]))
     print("Confusion matrix (rows=actual, cols=predicted) [clean, junk]:")
     print(confusion_matrix(y_test, predictions))

@@ -17,12 +17,16 @@
   "test_accuracy": 0.7946,
   "train_accuracy": 0.7713,
   "full_accuracy": 0.776,
-  "precision": 0.7391,
-  "recall": 0.8246,
-  "f1": 0.7795,
+  "precision": 0.746,
+  "recall": 0.8704,
+  "f1": 0.8034,
   "evaluated_on": "558 leads (268 junk / 290 clean) after exclusions",
-  "metrics_note": "Metrics computed by evaluating junk_classifier.joblib against crm.db using the model author's exact feature derivation AND training-set exclusions: leads in a terminal_type='bot' stage (79) and leads in the 'Junk' stage with junk_reason_id IS NULL (158) are removed, leaving 558 of the 795 current non-deleted leads. train/test are an 80/20 stratified split (random_state=42) for evaluation only, not the original training split. The original model reported ~82.9% on 524 rows; the exclusion rules match exactly, but the database has grown since training (761 -> 795 leads), so 558 remain here rather than 524, and measured test accuracy is 0.795.",
+  "trained_on": "446 leads (80% stratified train split; test on the held-out 112)",
+  "retrained": true,
+  "retrained_date": "2026-07-10",
+  "sklearn_version": "1.9.0",
+  "metrics_note": "Model retrained from scratch on crm.db via train_model.py using the author's exact 4-feature derivation (has_campaign/has_quiz_answers parsed from touchpoint raw_payload, matched_at_intake from system-ingested (actor_id IS NULL) create audit events, source label or 'none') and training-set exclusions (terminal_type='bot': 79; 'Junk' stage with null junk_reason_id: 158), leaving 558 of 795 leads. Fit on an 80/20 stratified split (random_state=42); train_accuracy is on the 446 train rows, test_accuracy and precision/recall/f1 are on the held-out 112 test rows, full_accuracy is over all 558 (includes train rows, so optimistic). Retrained under scikit-learn 1.9.0.",
   "threshold": 0.5,
   "model_file": "junk_classifier.joblib",
-  "version": "1.0"
+  "version": "2.0"
 }
