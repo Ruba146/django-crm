@@ -1,0 +1,9 @@
+export { DashboardHeader } from "./dashboard-header";
+export { KPICards } from "./kpi-cards";
+export { PipelineWidget } from "./pipeline-widget";
+export { RecentActivitiesWidget } from "./recent-activities-widget";
+export { UpcomingTasksWidget } from "./upcoming-tasks-widget";
+export { RecentDealsWidget } from "./recent-deals-widget";
+export { QuickActionsWidget } from "./quick-actions-widget";
+export { AIInsightsPlaceholder } from "./ai-insights-placeholder";
+export { DashboardGrid } from "./dashboard-grid";

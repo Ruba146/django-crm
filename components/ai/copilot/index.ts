@@ -1,0 +1,13 @@
+export { FloatingAIButton } from "./floating-ai-button";
+export { AICopilotProvider } from "./copilot-panel";
+export { ChatWindow } from "./chat-window";
+export { ChatMessage } from "./chat-message";
+export { ChatInput } from "./chat-input";
+export { TypingIndicator } from "./typing-indicator";
+export { SuggestedPrompts } from "./suggested-prompts";
+export { ConversationHistory } from "./conversation-history";
+export { PageContextDetector, useSetRecordContext } from "./page-context";
+export { VoiceButton } from "./voice-button";
+export { VoiceSettings } from "./voice-settings";
+export { ActionConfirmation } from "./action-confirmation";
+export { ActionHistoryPanel } from "./action-history-panel";
