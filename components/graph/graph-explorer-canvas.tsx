@@ -7,7 +7,7 @@ import { NODE_TYPE_CONFIG } from "@/types/graph";
 import { GraphControls } from "./graph-controls";
 import type { Dispatch, SetStateAction } from "react";
 
-type EntityKind = "root" | "group" | "lead" | "relationship";
+type EntityKind = "root" | "group" | "collection" | "lead" | "relationship";
 
 interface VisualNode extends GraphNode {
   kind: EntityKind;
@@ -16,49 +16,45 @@ interface VisualNode extends GraphNode {
 }
 
 const ROOT_ID = "all-leads";
-const NODE_SIZES = {
-  root: 22,
-  group: 16,
-  lead: 9,
-  relationship: 10,
-} as const;
 
 const LAYOUT = {
-  rootGroupRadius: 240,
-  groupLeadRadius: 170,
-  relationshipRadius: 120,
-  spread: {
-    depth0: 3.6,
-    depth1: 1.8,
-    depth2: 0.9,
-  },
+  rootRadius: 100,
+  categoryWidth: 260,
+  categoryHeight: 80,
+  categoryRx: 8,
+  categoryGapX: 300,
+  categoryGapY: 40,
+  categoryStartY: 200,
+  collectionWidth: 520,
+  collectionHeaderHeight: 44,
+  collectionRx: 6,
+  collectionHeaderGap: 16,
+  leadWidth: 120,
+  leadHeight: 48,
+  leadRx: 6,
+  leadGapX: 10,
+  leadGapY: 10,
+  leadsPerRow: 4,
 };
 
 export interface GraphExplorerCanvasProps {
-  onSelectRecord: (result: {
-    entityType: string;
-    entityId: string;
-    displayName: string;
-    secondaryText?: string;
-  }) => void;
+  onSelectRecord: (result: { entityType: string; entityId: string; displayName: string; secondaryText?: string }) => void;
   selectedNodeId?: string | null;
   onSelectNode?: Dispatch<SetStateAction<string | null>>;
+  expandedCategories: Set<string>;
+  onToggleCategory: (categoryId: string) => void;
   onClearSelection?: () => void;
 }
 
-function buildGroupKey(kind: "stage" | "source" | "owner", id: string) {
-  return `group:${kind}:${id}`;
-}
-
-function parseGroupKey(key: string): { kind: "stage" | "source" | "owner"; id: string } | null {
-  const match = /^group:(stage|source|owner):(.+)$/.exec(key);
-  if (!match) return null;
-  return { kind: match[1] as "stage" | "source" | "owner", id: match[2] };
-}
-
-export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSelectedNodeId, onSelectNode, onClearSelection }: GraphExplorerCanvasProps) {
+export function GraphExplorerCanvas({
+  onSelectRecord,
+  selectedNodeId: externalSelectedNodeId,
+  onSelectNode,
+  expandedCategories,
+  onToggleCategory,
+  onClearSelection,
+}: GraphExplorerCanvasProps) {
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(null);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [camera, setCamera] = useState({ x: 0, y: 0, scale: 1 });
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
@@ -70,67 +66,34 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
   const selectedNodeId = externalSelectedNodeId ?? internalSelectedNodeId;
   const setSelectedNodeId = onSelectNode || setInternalSelectedNodeId;
 
-  const { data: allLeads = [], isLoading: allLeadsLoading } = useQuery({
-    queryKey: ["graph-all-leads"],
+  const { data: leadCategories = [], isLoading: categoriesLoading } = useQuery({
+    queryKey: ["graph-lead-categories"],
     queryFn: async () => {
-      const res = await fetch("/api/graph/leads");
-      if (!res.ok) throw new Error("Failed to fetch leads");
-      return (await res.json()) as Array<{ id: string; full_name: string; company_name: string | null }>;
+      const res = await fetch("/api/graph/lead-categories");
+      if (!res.ok) throw new Error("Failed to fetch lead categories");
+      return (await res.json()) as Array<{ id: string; label: string; color: string; count: number }>;
     },
   });
 
-  const { data: aggregates, isLoading: aggregatesLoading } = useQuery({
-    queryKey: ["graph-aggregates"],
-    queryFn: async () => {
-      const res = await fetch("/api/graph/aggregates");
-      if (!res.ok) throw new Error("Failed to fetch aggregates");
-      return (await res.json()) as {
-        totalLeads: number;
-        stages: Array<{ id: string; label: string; color: string; count: number }>;
-        sources: Array<{ id: string; label: string; color: string; count: number }>;
-        owners: Array<{ id: string; name: string; count: number }>;
-      };
-    },
-  });
+  const expandedCategoryArray = useMemo(() => Array.from(expandedCategories), [expandedCategories]);
 
-  const expandedGroupArray = useMemo(() => Array.from(expandedGroups), [expandedGroups]);
-
-  const { data: groupLeadsMap } = useQuery({
-    queryKey: ["graph-group-leads", expandedGroupArray],
+  const { data: categoryLeadsMap = {} } = useQuery({
+    queryKey: ["graph-category-leads", expandedCategoryArray],
     queryFn: async () => {
-      const results: Record<string, Array<{ id: string; displayName: string; secondaryText?: string }>> = {};
+      const results: Record<string, { records: Array<{ entityType: string; entityId: string; displayName: string; secondaryText?: string }>; total: number; page: number; totalPages: number }> = {};
       await Promise.all(
-        expandedGroupArray.map(async (groupId) => {
-          const parsed = parseGroupKey(groupId);
-          if (!parsed) return;
-
-          const params = new URLSearchParams({ category: "leads", pageSize: "100" });
-          if (parsed.kind === "stage") params.set("stageId", parsed.id);
-          if (parsed.kind === "source") params.set("sourceId", parsed.id);
-          if (parsed.kind === "owner") params.set("ownerId", parsed.id);
-
-          const res = await fetch(`/api/graph/records-list?${params.toString()}`);
+        expandedCategoryArray.map(async (fullCategoryId) => {
+          const rawCategoryId = fullCategoryId.replace("category:", "");
+          const params = new URLSearchParams({ categoryId: rawCategoryId, all: "true" });
+          const res = await fetch(`/api/graph/category-leads?${params.toString()}`);
           if (!res.ok) return;
           const data = await res.json();
-          results[groupId] = data.records || [];
+          results[fullCategoryId] = data;
         })
       );
       return results;
     },
-    enabled: expandedGroupArray.length > 0,
-  });
-
-  const { data: selectedLeadDetails } = useQuery({
-    queryKey: ["graph-lead-details", selectedNodeId],
-    queryFn: async () => {
-      if (!selectedNodeId || !selectedNodeId.startsWith("lead:")) return null;
-      const id = selectedNodeId.replace("lead:", "");
-      const res = await fetch(`/api/graph/record-details?type=lead&id=${id}`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.detail as Record<string, unknown> | null;
-    },
-    enabled: !!selectedNodeId && selectedNodeId.startsWith("lead:"),
+    enabled: expandedCategoryArray.length > 0,
   });
 
   const { data: leadRelationships } = useQuery({
@@ -149,6 +112,21 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
     enabled: !!selectedNodeId && selectedNodeId.startsWith("lead:"),
   });
 
+  const totalLeads = useMemo(() => {
+    return leadCategories.reduce((sum, cat) => sum + cat.count, 0);
+  }, [leadCategories]);
+
+  const visibleLeadCount = useMemo(() => {
+    let count = 0;
+    for (const fullCategoryId of expandedCategoryArray) {
+      const leadsData = categoryLeadsMap[fullCategoryId];
+      if (leadsData) {
+        count += leadsData.records.length;
+      }
+    }
+    return count;
+  }, [expandedCategoryArray, categoryLeadsMap]);
+
   const graphNodes: VisualNode[] = useMemo(() => {
     const nodes: VisualNode[] = [];
     const seen = new Set<string>();
@@ -159,81 +137,58 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
       nodes.push(node);
     };
 
-    if (aggregates) {
+    addNode({
+      id: ROOT_ID,
+      type: "lead",
+      label: "All Leads",
+      sublabel: `${totalLeads.toLocaleString()} leads`,
+      color: "#7c3aed",
+      kind: "root",
+      depth: 0,
+      parentId: null,
+    });
+
+    for (const cat of leadCategories) {
+      if (cat.count <= 0) continue;
+      const categoryId = `category:${cat.id}`;
       addNode({
-        id: ROOT_ID,
+        id: categoryId,
         type: "lead",
-        label: "All Leads",
-        sublabel: `${aggregates.totalLeads.toLocaleString()} leads`,
-        color: "#7c3aed",
-        kind: "root",
-        depth: 0,
-        parentId: null,
+        label: cat.label,
+        sublabel: `${cat.count.toLocaleString()} leads`,
+        color: cat.color,
+        kind: "group",
+        depth: 1,
+        parentId: ROOT_ID,
       });
 
-      for (const s of aggregates.stages) {
-        if (s.count <= 0) continue;
-        const id = buildGroupKey("stage", s.id);
+      if (expandedCategories.has(categoryId)) {
+        const leadsData = categoryLeadsMap[`category:${cat.id}`];
         addNode({
-          id,
-          type: "stage",
-          label: s.label || s.id,
-          sublabel: `${s.count} leads`,
-          color: s.color || "#7c3aed",
-          kind: "group",
-          depth: 1,
-          parentId: ROOT_ID,
-          metadata: { groupKind: "stage", groupId: s.id, count: s.count },
+          id: `collection:${cat.id}`,
+          type: "lead",
+          label: cat.label,
+          sublabel: `${cat.count.toLocaleString()} total`,
+          color: cat.color,
+          kind: "collection",
+          depth: 2,
+          parentId: categoryId,
         });
-      }
 
-      for (const s of aggregates.sources) {
-        if (s.count <= 0) continue;
-        const id = buildGroupKey("source", s.id);
-        addNode({
-          id,
-          type: "source",
-          label: s.label || s.id,
-          sublabel: `${s.count} leads`,
-          color: s.color || "#059669",
-          kind: "group",
-          depth: 1,
-          parentId: ROOT_ID,
-          metadata: { groupKind: "source", groupId: s.id, count: s.count },
-        });
-      }
-
-      for (const o of aggregates.owners) {
-        if (o.count <= 0 || !o.name) continue;
-        const id = buildGroupKey("owner", o.id);
-        addNode({
-          id,
-          type: "user",
-          label: o.name,
-          sublabel: `${o.count} leads`,
-          color: "#8b5cf6",
-          kind: "group",
-          depth: 1,
-          parentId: ROOT_ID,
-          metadata: { groupKind: "owner", groupId: o.id, count: o.count },
-        });
-      }
-    }
-
-    if (groupLeadsMap) {
-      for (const [groupId, records] of Object.entries(groupLeadsMap)) {
-        for (const rec of records) {
-          const leadId = `lead:${rec.id}`;
-          addNode({
-            id: leadId,
-            type: "lead",
-            label: rec.displayName || rec.id,
-            sublabel: rec.secondaryText || undefined,
-            color: NODE_TYPE_CONFIG.lead.color,
-            kind: "lead",
-            depth: 2,
-            parentId: groupId,
-          });
+        if (leadsData) {
+          for (const rec of leadsData.records) {
+            const leadId = `lead:${rec.entityId}`;
+            addNode({
+              id: leadId,
+              type: "lead",
+              label: rec.displayName || rec.entityId,
+              sublabel: rec.secondaryText || undefined,
+              color: NODE_TYPE_CONFIG.lead.color,
+              kind: "lead",
+              depth: 3,
+              parentId: `collection:${cat.id}`,
+            });
+          }
         }
       }
     }
@@ -245,30 +200,172 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
         addNode({
           ...relNode,
           kind: "relationship",
-          depth: 3,
+          depth: 4,
           parentId: selectedNodeId,
         });
       }
     }
 
-      if (selectedNodeId && selectedNodeId.startsWith("lead:") && allLeads.length > 0) {
-        const selectedLead = allLeads.find((l) => `lead:${l.id}` === selectedNodeId);
-        if (selectedLead && !seen.has(selectedNodeId)) {
-          addNode({
-            id: selectedNodeId,
-            type: "lead",
-            label: selectedLead.full_name || selectedLead.id,
-            sublabel: selectedLead.company_name || undefined,
-            color: NODE_TYPE_CONFIG.lead.color,
-            kind: "lead",
-            depth: selectedNodeId.startsWith("lead:") ? 2 : 3,
-            parentId: selectedNodeId && expandedGroups.has(selectedNodeId) ? null : ROOT_ID,
-          });
+    return nodes;
+  }, [leadCategories, expandedCategories, categoryLeadsMap, leadRelationships, selectedNodeId, totalLeads]);
+
+  const nodeMap = useMemo(() => {
+    const map = new Map<string, VisualNode>();
+    for (const n of graphNodes) map.set(n.id, n);
+    return map;
+  }, [graphNodes]);
+
+  const nodePositions = useMemo(() => {
+    if (graphNodes.length === 0) return new Map<string, { x: number; y: number; width?: number; height?: number }>();
+
+    const positions = new Map<string, { x: number; y: number; width?: number; height?: number }>();
+    const categoryRowMap: Record<string, number> = {};
+    const categoryLeadIds: Record<string, string[]> = {};
+
+    const TOP_ROW_Y = -250;
+    const BOTTOM_ROW_Y = 250;
+    const ROOT_RADIUS = LAYOUT.rootRadius;
+
+    positions.set(ROOT_ID, { x: 0, y: 0, width: ROOT_RADIUS * 2, height: ROOT_RADIUS * 2 });
+
+    const categoriesPerRow = 5;
+    const totalCategoryWidth = categoriesPerRow * LAYOUT.categoryWidth + (categoriesPerRow - 1) * LAYOUT.categoryGapX;
+    const categoryStartX = -totalCategoryWidth / 2 + LAYOUT.categoryWidth / 2;
+
+    const visibleCategories = leadCategories.filter((cat) => cat.count > 0);
+    const categoryIndexMap: Record<string, number> = {};
+    leadCategories.forEach((cat, i) => {
+      categoryIndexMap[cat.id] = i;
+    });
+
+    visibleCategories.forEach((cat) => {
+      const originalIndex = categoryIndexMap[cat.id];
+      const row = originalIndex < 5 ? 0 : 1;
+      const col = originalIndex % categoriesPerRow;
+      const x = categoryStartX + col * (LAYOUT.categoryWidth + LAYOUT.categoryGapX);
+      const y = row === 0 ? TOP_ROW_Y : BOTTOM_ROW_Y;
+      positions.set(`category:${cat.id}`, { x, y, width: LAYOUT.categoryWidth, height: LAYOUT.categoryHeight });
+      categoryRowMap[cat.id] = row;
+      categoryLeadIds[cat.id] = [];
+    });
+
+    const topExpandedBounds: Array<{ top: number; categoryId: string }> = [];
+    const bottomExpandedBounds: Array<{ bottom: number; categoryId: string }> = [];
+
+    for (const cat of leadCategories) {
+      const categoryId = `category:${cat.id}`;
+      const categoryPos = positions.get(categoryId);
+      if (!categoryPos) continue;
+
+      if (expandedCategories.has(categoryId)) {
+        const leadsData = categoryLeadsMap[categoryId];
+        if (!leadsData) continue;
+
+        const allLeads = leadsData.records;
+        const numRows = Math.ceil(allLeads.length / LAYOUT.leadsPerRow) || 1;
+        const collectionHeight = LAYOUT.collectionHeaderHeight + numRows * (LAYOUT.leadHeight + LAYOUT.leadGapY) + 20;
+
+        const collectionX = categoryPos.x;
+        let collectionY: number;
+
+        if (categoryPos.y < 0) {
+          collectionY = categoryPos.y - LAYOUT.categoryHeight / 2 - LAYOUT.collectionHeaderGap - collectionHeight / 2;
+        } else {
+          collectionY = categoryPos.y + LAYOUT.categoryHeight / 2 + LAYOUT.collectionHeaderGap + collectionHeight / 2;
+        }
+
+        const panelTop = collectionY - collectionHeight / 2;
+        const panelBottom = collectionY + collectionHeight / 2;
+
+        positions.set(`collection:${cat.id}`, { x: collectionX, y: collectionY, width: LAYOUT.collectionWidth, height: collectionHeight });
+
+        const leadIds: string[] = [];
+        allLeads.forEach((lead, i) => {
+          const leadRow = Math.floor(i / LAYOUT.leadsPerRow);
+          const col = i % LAYOUT.leadsPerRow;
+          const leadsInRow = Math.min(LAYOUT.leadsPerRow, allLeads.length - leadRow * LAYOUT.leadsPerRow);
+          const rowWidth = leadsInRow * LAYOUT.leadWidth + (leadsInRow - 1) * LAYOUT.leadGapX;
+          const startX = collectionX - rowWidth / 2 + LAYOUT.leadWidth / 2;
+
+          const leadX = startX + col * (LAYOUT.leadWidth + LAYOUT.leadGapX);
+          const leadY = collectionY + LAYOUT.collectionHeaderHeight / 2 + 10 + leadRow * (LAYOUT.leadHeight + LAYOUT.leadGapY) + LAYOUT.leadHeight / 2;
+          positions.set(`lead:${lead.entityId}`, { x: leadX, y: leadY, width: LAYOUT.leadWidth, height: LAYOUT.leadHeight });
+          leadIds.push(lead.entityId);
+        });
+        categoryLeadIds[cat.id] = leadIds;
+
+        if (categoryPos.y < 0) {
+          topExpandedBounds.push({ top: panelTop, categoryId });
+        } else {
+          bottomExpandedBounds.push({ bottom: panelBottom, categoryId });
         }
       }
+    }
 
-    return nodes;
-  }, [aggregates, groupLeadsMap, leadRelationships, selectedNodeId, allLeads, expandedGroups]);
+    const rootTop = -ROOT_RADIUS;
+    const rootBottom = ROOT_RADIUS;
+    const gap = 40;
+
+    let topRowShift = 0;
+    for (const bound of topExpandedBounds) {
+      if (bound.top < rootTop - gap) {
+        topRowShift = Math.max(topRowShift, rootTop - gap - bound.top);
+      }
+    }
+
+    let bottomRowShift = 0;
+    for (const bound of bottomExpandedBounds) {
+      if (bound.bottom > rootBottom + gap) {
+        bottomRowShift = Math.max(bottomRowShift, bound.bottom - (rootBottom + gap));
+      }
+    }
+
+    const shiftRow = (row: number, deltaY: number) => {
+      for (const cat of leadCategories) {
+        if (categoryRowMap[cat.id] !== row) continue;
+        const categoryId = `category:${cat.id}`;
+        const pos = positions.get(categoryId);
+        if (!pos) continue;
+
+        const newY = pos.y + deltaY;
+        positions.set(categoryId, { ...pos, y: newY });
+
+        const collectionPos = positions.get(`collection:${cat.id}`);
+        if (collectionPos && expandedCategories.has(categoryId)) {
+          positions.set(`collection:${cat.id}`, { ...collectionPos, y: collectionPos.y + deltaY });
+
+          const leadIds = categoryLeadIds[cat.id] || [];
+          for (const leadId of leadIds) {
+            const leadPos = positions.get(`lead:${leadId}`);
+            if (leadPos) {
+              positions.set(`lead:${leadId}`, { ...leadPos, y: leadPos.y + deltaY });
+            }
+          }
+        }
+      }
+    };
+
+    if (topRowShift > 0) shiftRow(0, -topRowShift);
+    if (bottomRowShift > 0) shiftRow(1, bottomRowShift);
+
+    if (leadRelationships && selectedNodeId) {
+      const selectedPos = positions.get(selectedNodeId);
+      if (selectedPos) {
+        leadRelationships.nodes.forEach((relNode, i) => {
+          const relKey = `${relNode.type}:${relNode.id}`;
+          if (relKey === selectedNodeId.replace("lead:", "")) return;
+          positions.set(relKey, {
+            x: selectedPos.x + 180 + (i % 3) * 140,
+            y: selectedPos.y + Math.floor(i / 3) * 70 - 35,
+            width: 120,
+            height: 50,
+          });
+        });
+      }
+    }
+
+    return positions;
+  }, [graphNodes, leadCategories, expandedCategories, categoryLeadsMap, leadRelationships, selectedNodeId]);
 
   const graphEdges: GraphEdge[] = useMemo(() => {
     const edges: GraphEdge[] = [];
@@ -281,12 +378,13 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
     };
 
     for (const node of graphNodes) {
-      if (node.kind === "root" || node.depth === 1) {
-        if (node.parentId === ROOT_ID) {
-          addEdge({ id: `${ROOT_ID}->${node.id}`, source: ROOT_ID, target: node.id, relationship: "HAS_GROUP" });
-        }
+      if (node.kind === "group" && node.parentId === ROOT_ID) {
+        addEdge({ id: `${ROOT_ID}->${node.id}`, source: ROOT_ID, target: node.id, relationship: "HAS_CATEGORY" });
       }
-      if (node.kind === "lead" && node.depth === 2 && node.parentId && node.parentId !== ROOT_ID) {
+      if (node.kind === "collection" && node.parentId) {
+        addEdge({ id: `${node.parentId}->${node.id}`, source: node.parentId, target: node.id, relationship: "HAS_COLLECTION" });
+      }
+      if (node.kind === "lead" && node.depth === 3 && node.parentId) {
         addEdge({ id: `${node.parentId}->${node.id}`, source: node.parentId, target: node.id, relationship: "HAS_LEAD" });
       }
     }
@@ -300,70 +398,6 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
     return edges;
   }, [graphNodes, leadRelationships, selectedNodeId]);
 
-  const nodePositions = useMemo(() => {
-    if (graphNodes.length === 0) return new Map<string, { x: number; y: number }>();
-
-    const positions = new Map<string, { x: number; y: number }>();
-    const childrenByParent = new Map<string | null, VisualNode[]>();
-
-    for (const node of graphNodes) {
-      if (node.depth === 0) continue;
-      const parentId = node.parentId || null;
-      if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
-      childrenByParent.get(parentId)!.push(node);
-    }
-
-    for (const [, children] of childrenByParent) {
-      children.sort((a, b) => String(a.label ?? "").localeCompare(String(b.label ?? ""), undefined, { sensitivity: "base" }));
-    }
-
-    const root = graphNodes.find((n) => n.depth === 0);
-    if (root) {
-      positions.set(root.id, { x: 0, y: 0 });
-    }
-
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-
-    function place(parentId: string | null, depth: number) {
-      const parentPos = parentId ? positions.get(parentId) : { x: 0, y: 0 };
-      if (!parentPos) return;
-
-      const children = childrenByParent.get(parentId) || [];
-      if (children.length === 0) return;
-
-      const baseRadius =
-        depth === 0 ? LAYOUT.rootGroupRadius : depth === 1 ? LAYOUT.groupLeadRadius : LAYOUT.relationshipRadius;
-      const spread = depth === 0 ? LAYOUT.spread.depth0 : depth === 1 ? LAYOUT.spread.depth1 : LAYOUT.spread.depth2;
-      const maxRadius = baseRadius + children.length * spread;
-
-      children.forEach((child, i) => {
-        const angle = i * goldenAngle;
-        const r = Math.sqrt((i + 1) / children.length) * maxRadius;
-        positions.set(child.id, {
-          x: parentPos.x + r * Math.cos(angle),
-          y: parentPos.y + r * Math.sin(angle),
-        });
-        place(child.id, depth + 1);
-      });
-    }
-
-    const rootChildren = childrenByParent.get(ROOT_ID) || [];
-    if (rootChildren.length > 0) {
-      place(ROOT_ID, 0);
-    }
-
-    return positions;
-  }, [graphNodes]);
-
-  const nodeMap = useMemo(() => {
-    const map = new Map<string, VisualNode>();
-    for (const n of graphNodes) map.set(n.id, n);
-    return map;
-  }, [graphNodes]);
-
-  const selectedLeadNode = selectedNodeId && selectedNodeId.startsWith("lead:") ? nodeMap.get(selectedNodeId) : null;
-  const selectedLeadPos = selectedNodeId ? nodePositions.get(selectedNodeId) : null;
-
   const handleFitView = useCallback(() => {
     if (nodePositions.size === 0) return;
     let minX = Infinity;
@@ -371,17 +405,15 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
     let maxX = -Infinity;
     let maxY = -Infinity;
 
-    for (const node of graphNodes) {
-      const pos = nodePositions.get(node.id);
-      if (!pos) continue;
-      const r = NODE_SIZES[node.kind] || NODE_SIZES.lead;
-      minX = Math.min(minX, pos.x - r);
-      minY = Math.min(minY, pos.y - r);
-      maxX = Math.max(maxX, pos.x + r);
-      maxY = Math.max(maxY, pos.y + r);
+    for (const [, pos] of nodePositions) {
+      const padding = 15;
+      minX = Math.min(minX, pos.x - (pos.width || 0) / 2 - padding);
+      minY = Math.min(minY, pos.y - (pos.height || 0) / 2 - padding);
+      maxX = Math.max(maxX, pos.x + (pos.width || 0) / 2 + padding);
+      maxY = Math.max(maxY, pos.y + (pos.height || 0) / 2 + padding);
     }
 
-    const padding = 80;
+    const padding = 40;
     const availableWidth = canvasSize.width - padding * 2;
     const availableHeight = canvasSize.height - padding * 2;
 
@@ -389,20 +421,20 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
 
     const scaleX = availableWidth / (maxX - minX);
     const scaleY = availableHeight / (maxY - minY);
-    const scale = Math.min(Math.max(Math.min(scaleX, scaleY), 0.3), 1.5);
+    const scale = Math.min(Math.max(Math.min(scaleX, scaleY), 0.3), 2.0);
 
     setCamera({
       x: (minX + maxX) / 2,
       y: (minY + maxY) / 2,
       scale,
     });
-  }, [nodePositions, canvasSize, graphNodes]);
+  }, [nodePositions, canvasSize]);
 
   const handleResetView = useCallback(() => {
     setCamera({ x: 0, y: 0, scale: 1 });
-    setExpandedGroups(new Set());
+    onToggleCategory("__reset__");
     setSelectedNodeId(null);
-  }, []);
+  }, [setSelectedNodeId, onToggleCategory]);
 
   const handleCenterSelected = useCallback(() => {
     if (!selectedNodeId) return;
@@ -424,43 +456,49 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
   const handleNodeClick = useCallback(
     (nodeId: string) => {
       if (nodeId === ROOT_ID) {
-        setExpandedGroups(new Set());
+        onToggleCategory("__reset__");
         setSelectedNodeId(null);
+        onClearSelection?.();
         return;
       }
 
-      const parsed = parseGroupKey(nodeId);
-      if (parsed) {
+      if (nodeId.startsWith("category:")) {
         setSelectedNodeId(null);
-        setExpandedGroups((prev) => {
-          const next = new Set(prev);
-          if (next.has(nodeId)) {
-            next.delete(nodeId);
-          } else {
-            next.add(nodeId);
-          }
-          return next;
-        });
+        onToggleCategory(nodeId);
         return;
       }
 
       if (nodeId.startsWith("lead:")) {
+        const node = nodeMap.get(nodeId);
+        if (node) {
+          onSelectRecord({
+            entityType: "lead",
+            entityId: node.id.replace("lead:", ""),
+            displayName: node.label,
+            secondaryText: node.sublabel || undefined,
+          });
+        }
         setSelectedNodeId((prev) => {
           if (prev === nodeId) return null;
           return nodeId;
         });
         return;
       }
+
+      if (nodeId.startsWith("collection:")) {
+        return;
+      }
     },
-    [setSelectedNodeId]
+    [setSelectedNodeId, onToggleCategory, onSelectRecord, onClearSelection, nodeMap]
   );
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target === containerRef.current || target.tagName === "svg" || target.classList.contains("graph-bg")) {
       setSelectedNodeId(null);
+      onClearSelection?.();
     }
-  }, [setSelectedNodeId]);
+  }, [setSelectedNodeId, onClearSelection]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -540,52 +578,49 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
     setSelectedNodeId(null);
   }, [setSelectedNodeId]);
 
-  const worldToScreen = useCallback(
-    (wx: number, wy: number) => {
-      return {
-        x: (wx - camera.x) * camera.scale + canvasSize.width / 2,
-        y: (wy - camera.y) * camera.scale + canvasSize.height / 2,
-      };
-    },
-    [camera, canvasSize]
-  );
-
   const isDimmed = useCallback(
     (nodeId: string) => {
       if (!selectedNodeId && !hoveredNodeId) return false;
-      if (nodeId === selectedNodeId || nodeId === hoveredNodeId) return false;
       if (nodeId === ROOT_ID) return false;
 
-      if (selectedNodeId) {
-        const selectedNode = nodeMap.get(selectedNodeId);
-        if (selectedNode && selectedNode.kind === "lead") {
-          const relatedIds = new Set<string>();
-          relatedIds.add(selectedNodeId);
-          if (leadRelationships) {
-            for (const edge of leadRelationships.edges) {
-              if (edge.source === selectedNodeId) relatedIds.add(edge.target);
-              if (edge.target === selectedNodeId) relatedIds.add(edge.source);
+      const selectedNode = selectedNodeId ? nodeMap.get(selectedNodeId) : null;
+      const hoveredNode = hoveredNodeId ? nodeMap.get(hoveredNodeId) : null;
+
+      if (selectedNode && selectedNode.kind === "lead") {
+        if (nodeId === selectedNodeId) return false;
+
+        let parentId = selectedNode.parentId;
+        while (parentId) {
+          if (nodeId === parentId) return false;
+          const parent = nodeMap.get(parentId);
+          parentId = parent?.parentId || null;
+        }
+
+        if (leadRelationships) {
+          for (const edge of leadRelationships.edges) {
+            if (edge.source === selectedNodeId || edge.target === selectedNodeId) {
+              if (nodeId === edge.source || nodeId === edge.target) return false;
             }
           }
-          if (relatedIds.has(nodeId)) return false;
-          return true;
         }
+
+        return true;
       }
 
-      if (hoveredNodeId) {
-        const hoveredNode = nodeMap.get(hoveredNodeId);
-        if (hoveredNode && hoveredNode.kind === "lead") {
-          const relatedIds = new Set<string>();
-          relatedIds.add(hoveredNodeId);
-          if (leadRelationships) {
-            for (const edge of leadRelationships.edges) {
-              if (edge.source === hoveredNodeId) relatedIds.add(edge.target);
-              if (edge.target === hoveredNodeId) relatedIds.add(edge.source);
-            }
-          }
-          if (relatedIds.has(nodeId)) return false;
-          return true;
+      if (hoveredNode) {
+        if (nodeId === hoveredNodeId) return false;
+
+        const isChild = nodeMap.get(nodeId)?.parentId === hoveredNodeId;
+        if (isChild) return false;
+
+        let parentId = hoveredNode.parentId;
+        while (parentId) {
+          if (nodeId === parentId) return false;
+          const parent = nodeMap.get(parentId);
+          parentId = parent?.parentId || null;
         }
+
+        return true;
       }
 
       return false;
@@ -595,29 +630,13 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
 
   const viewBox = `${camera.x - canvasSize.width / camera.scale / 2} ${camera.y - canvasSize.height / camera.scale / 2} ${canvasSize.width / camera.scale} ${canvasSize.height / camera.scale}`;
 
-  let detailsStyle: React.CSSProperties = { display: "none" };
-  if (selectedLeadNode && selectedLeadPos) {
-    const screen = worldToScreen(selectedLeadPos.x, selectedLeadPos.y);
-    const panelWidth = 280;
-    let left = screen.x - panelWidth / 2;
-    let top = screen.y + NODE_SIZES.lead * camera.scale + 10;
-
-    left = Math.max(8, Math.min(canvasSize.width - panelWidth - 8, left));
-    if (top + 170 > canvasSize.height) {
-      top = screen.y - NODE_SIZES.lead * camera.scale - 170;
-    }
-    top = Math.max(8, top);
-
-    detailsStyle = { left, top, display: "block" };
-  }
-
-  const isLoading = aggregatesLoading || allLeadsLoading;
+  const isLoading = categoriesLoading;
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    <div className="flex flex-1 min-h-0 flex-col w-full min-w-0">
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 relative bg-white overflow-hidden cursor-grab active:cursor-grabbing"
+        className="flex-1 min-h-0 relative bg-white overflow-hidden cursor-grab active:cursor-grabbing w-full min-w-0"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -641,6 +660,9 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
                 <stop offset="0%" stopColor="#7c3aed" />
                 <stop offset="100%" stopColor="#6d28d9" />
               </linearGradient>
+              <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#7c3aed" />
+              </marker>
             </defs>
 
             {graphEdges.map((edge) => {
@@ -666,6 +688,7 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
                     stroke={isHighlighted ? "#7c3aed" : "#e4e4e7"}
                     strokeWidth={isHighlighted ? 2 : 1}
                     opacity={dimmed ? 0.1 : isHighlighted ? 0.6 : 0.3}
+                    markerEnd="url(#arrowhead)"
                     className="transition-all duration-200"
                   />
                 </g>
@@ -676,28 +699,26 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
               const pos = nodePositions.get(node.id);
               if (!pos) return null;
               const isSelected = node.id === selectedNodeId;
-              const isHovered = node.id === hoveredNodeId;
               const dimmed = isDimmed(node.id);
-              const size = NODE_SIZES[node.kind] || NODE_SIZES.lead;
-              const radius = isSelected ? size + 3 : isHovered ? size + 1 : size;
 
               if (node.kind === "root") {
+                const radius = LAYOUT.rootRadius;
                 return (
                   <g
                     key={node.id}
                     transform={`translate(${pos.x}, ${pos.y})`}
                     className="cursor-pointer"
-                    onMouseDown={(e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
                       handleNodeClick(node.id);
                     }}
                   >
                     <circle r={radius} fill="url(#root-gradient)" filter="url(#glow-purple)" opacity={dimmed ? 0.4 : 1} />
-                    <text textAnchor="middle" dy="-0.2em" className="text-[10px] font-semibold pointer-events-none select-none" fill="#ffffff">
+                    <text textAnchor="middle" dy="-0.3em" className="text-sm font-bold pointer-events-none select-none" fill="#ffffff">
                       {node.label}
                     </text>
                     {node.sublabel && (
-                      <text textAnchor="middle" dy="1.2em" className="text-[8px] pointer-events-none select-none" fill="#e9d5ff">
+                      <text textAnchor="middle" dy="1.4em" className="text-xs pointer-events-none select-none" fill="#e9d5ff">
                         {node.sublabel}
                       </text>
                     )}
@@ -706,8 +727,12 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
               }
 
               if (node.kind === "group") {
-                const parsed = parseGroupKey(node.id);
-                const isExpanded = parsed ? expandedGroups.has(node.id) : false;
+                const isExpanded = expandedCategories.has(node.id);
+                const w = LAYOUT.categoryWidth;
+                const h = LAYOUT.categoryHeight;
+                const rx = LAYOUT.categoryRx;
+                const label = node.label || "";
+
                 return (
                   <g
                     key={node.id}
@@ -715,40 +740,45 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
                     className="cursor-pointer transition-all duration-200"
                     onMouseEnter={() => setHoveredNodeId(node.id)}
                     onMouseLeave={() => setHoveredNodeId(null)}
-                    onMouseDown={(e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
                       handleNodeClick(node.id);
                     }}
                   >
-                    <circle
-                      r={radius}
+                    <rect
+                      x={-w / 2}
+                      y={-h / 2}
+                      width={w}
+                      height={h}
+                      rx={rx}
                       fill={node.color}
-                      opacity={dimmed ? 0.3 : 0.9}
+                      opacity={dimmed ? 0.3 : 0.95}
                       filter="url(#shadow-sm)"
                       className="transition-all duration-200"
                     />
                     <text
                       textAnchor="middle"
-                      dy="0.35em"
-                      className="text-[10px] font-medium pointer-events-none select-none"
+                      dy="-0.25em"
+                      className="text-xs font-semibold pointer-events-none select-none"
                       fill="#ffffff"
                     >
-                      {node.label && node.label.length > 10 ? node.label.slice(0, 9) + "…" : node.label || ""}
+                      {label}
                     </text>
                     <text
                       textAnchor="middle"
-                      dy={radius + 12}
-                      className="text-[8px] pointer-events-none select-none"
-                      fill={dimmed ? "#64748b" : "#ffffff"}
+                      dy="1.4em"
+                      className="text-[11px] pointer-events-none select-none"
+                      fill="#ffffff"
+                      opacity={0.9}
                     >
                       {node.sublabel}
                     </text>
-                    <g transform={`translate(${radius + 6}, ${-radius + 6})`}>
-                      <circle r="8" fill="#fff" opacity={dimmed ? 0.3 : 0.9} />
+                    <g transform={`translate(${w / 2 - 20}, ${-h / 2 + 12})`}>
+                      <circle r="11" fill="#fff" opacity={dimmed ? 0.3 : 0.9} />
                       <text
                         textAnchor="middle"
                         dy="0.35em"
-                        className="text-[8px] pointer-events-none select-none"
+                        className="text-[11px] font-bold pointer-events-none select-none"
                         fill={node.color}
                       >
                         {isExpanded ? "−" : "+"}
@@ -758,13 +788,129 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
                 );
               }
 
+              if (node.kind === "collection") {
+                const categoryId = node.id.replace("collection:", "");
+                const leadsData = categoryLeadsMap[categoryId];
+                const total = leadsData?.total || 0;
+                const w = LAYOUT.collectionWidth;
+                const headerH = LAYOUT.collectionHeaderHeight;
+                const totalH = pos.height || headerH;
+
+                return (
+                  <g
+                    key={node.id}
+                    transform={`translate(${pos.x}, ${pos.y})`}
+                    className="transition-all duration-200"
+                    onMouseEnter={() => setHoveredNodeId(node.id)}
+                    onMouseLeave={() => setHoveredNodeId(null)}
+                  >
+                    <rect
+                      x={-w / 2}
+                      y={-totalH / 2}
+                      width={w}
+                      height={totalH}
+                      rx={LAYOUT.collectionRx}
+                      fill="#ffffff"
+                      stroke="#e2e8f0"
+                      strokeWidth="1"
+                      opacity={dimmed ? 0.4 : 1}
+                    />
+                    <rect
+                      x={-w / 2}
+                      y={-totalH / 2}
+                      width={w}
+                      height={headerH}
+                      rx={LAYOUT.collectionRx}
+                      fill={node.color}
+                      opacity={dimmed ? 0.3 : 0.95}
+                    />
+                    <text
+                      x={-w / 2 + 14}
+                      y={-totalH / 2 + 16}
+                      className="text-xs font-semibold pointer-events-none select-none"
+                      fill="#ffffff"
+                    >
+                      {node.label}
+                    </text>
+                    <text
+                      x={-w / 2 + 14}
+                      y={-totalH / 2 + 30}
+                      className="text-[10px] pointer-events-none select-none"
+                      fill="#ffffff"
+                      opacity={0.9}
+                    >
+                      {total} total
+                    </text>
+                  </g>
+                );
+              }
+
+              if (node.kind === "lead") {
+                const w = LAYOUT.leadWidth;
+                const h = LAYOUT.leadHeight;
+                const rx = LAYOUT.leadRx;
+                const label = node.label || "";
+                const displayLabel = label.length > 14 ? label.slice(0, 13) + "…" : label;
+                const sublabel = node.sublabel || "";
+                const displaySublabel = sublabel.length > 16 ? sublabel.slice(0, 15) + "…" : sublabel;
+
+                return (
+                  <g
+                    key={node.id}
+                    transform={`translate(${pos.x}, ${pos.y})`}
+                    onMouseEnter={() => setHoveredNodeId(node.id)}
+                    onMouseLeave={() => setHoveredNodeId(null)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNodeClick(node.id);
+                    }}
+                    className="cursor-pointer transition-all duration-200"
+                  >
+                    <rect
+                      x={-w / 2}
+                      y={-h / 2}
+                      width={w}
+                      height={h}
+                      rx={rx}
+                      fill={isSelected ? "#7c3aed" : "#ffffff"}
+                      stroke={isSelected ? "#7c3aed" : "#d4d4d8"}
+                      strokeWidth={isSelected ? 2.5 : 1}
+                      filter={isSelected ? "url(#glow-purple)" : "url(#shadow-sm)"}
+                      opacity={dimmed ? 0.3 : 1}
+                      className="transition-all duration-200"
+                    />
+                    <text
+                      textAnchor="middle"
+                      dy="-0.2em"
+                      className="text-[11px] font-medium pointer-events-none select-none"
+                      fill={isSelected ? "#ffffff" : "#18181b"}
+                    >
+                      {displayLabel}
+                    </text>
+                    {displaySublabel && (
+                      <text
+                        textAnchor="middle"
+                        dy="1.2em"
+                        className="text-[10px] pointer-events-none select-none"
+                        fill={isSelected ? "#e9d5ff" : "#71717a"}
+                      >
+                        {displaySublabel}
+                      </text>
+                    )}
+                  </g>
+                );
+              }
+
+              const label = node.label || "";
+              const displayLabel = label.length > 12 ? label.slice(0, 11) + "…" : label;
+
               return (
                 <g
                   key={node.id}
-                  transform={`translate(${pos.x}, ${pos.y})`}
+                   transform={`translate(${pos.x}, ${pos.y})`}
                   onMouseEnter={() => setHoveredNodeId(node.id)}
                   onMouseLeave={() => setHoveredNodeId(null)}
-                  onMouseDown={(e) => {
+                  onClick={(e) => {
                     e.stopPropagation();
                     handleNodeClick(node.id);
                   }}
@@ -772,7 +918,7 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
                 >
                   <title>{node.label}{node.sublabel ? ` (${node.sublabel})` : ""}</title>
                   <circle
-                    r={radius}
+                    r={20}
                     fill={isSelected ? "#7c3aed" : "#ffffff"}
                     stroke={isSelected ? "#7c3aed" : "#d4d4d8"}
                     strokeWidth={isSelected ? 2.5 : 1}
@@ -780,103 +926,29 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
                     opacity={dimmed ? 0.3 : 1}
                     className="transition-all duration-200"
                   />
-                  {(showLabels || isSelected || isHovered) && (
-                    <text
-                      textAnchor="middle"
-                      dy="0.35em"
-                      className="text-[7px] font-medium pointer-events-none select-none"
-                      fill={isSelected ? "#ffffff" : "#18181b"}
-                    >
-                      {node.label && node.label.length > 10 ? node.label.slice(0, 9) + "…" : node.label || ""}
-                    </text>
-                  )}
+                  <text
+                    textAnchor="middle"
+                    dy="0.35em"
+                    className="text-[9px] font-medium pointer-events-none select-none"
+                    fill={isSelected ? "#ffffff" : "#18181b"}
+                  >
+                    {displayLabel}
+                  </text>
                 </g>
               );
             })}
           </svg>
         )}
 
-        {selectedLeadNode && selectedLeadPos && (
-          <div
-            className="absolute z-20 w-[280px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl"
-            style={detailsStyle}
-          >
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="min-w-0">
-                <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">Selected Lead</p>
-                <p className="text-sm font-semibold text-slate-100 truncate">{selectedLeadNode.label}</p>
-              </div>
-              <div className="flex gap-1">
-                <button
-                  onClick={() =>
-                    onSelectRecord({
-                      entityType: selectedLeadNode.type,
-                      entityId: selectedLeadNode.id.replace("lead:", ""),
-                      displayName: selectedLeadNode.label,
-                    })
-                  }
-                  className="text-[10px] px-2 py-1 rounded-md bg-purple-500/10 text-purple-300 hover:bg-purple-500/15 transition-colors"
-                >
-                  Open
-                </button>
-                <button
-                  onClick={() => setSelectedNodeId(null)}
-                  className="text-[10px] px-2 py-1 rounded-md bg-white/5 text-slate-300 hover:bg-white/10 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            {selectedLeadDetails && (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
-                {(selectedLeadDetails as Record<string, string | number | boolean | null>).company_name && (
-                  <div className="col-span-2">
-                    <span className="text-slate-500">Company:</span>{" "}
-                    <span className="text-slate-300">
-                      {String((selectedLeadDetails as Record<string, string | number | boolean | null>).company_name)}
-                    </span>
-                  </div>
-                )}
-                {(selectedLeadDetails as Record<string, string | number | boolean | null>).stage_label && (
-                  <div>
-                    <span className="text-slate-500">Stage:</span>{" "}
-                    <span className="text-slate-300">
-                      {String((selectedLeadDetails as Record<string, string | number | boolean | null>).stage_label)}
-                    </span>
-                  </div>
-                )}
-                {(selectedLeadDetails as Record<string, string | number | boolean | null>).source_label && (
-                  <div>
-                    <span className="text-slate-500">Source:</span>{" "}
-                    <span className="text-slate-300">
-                      {String((selectedLeadDetails as Record<string, string | number | boolean | null>).source_label)}
-                    </span>
-                  </div>
-                )}
-                {(selectedLeadDetails as Record<string, string | number | boolean | null>).owner_name && (
-                  <div>
-                    <span className="text-slate-500">Owner:</span>{" "}
-                    <span className="text-slate-300">
-                      {String((selectedLeadDetails as Record<string, string | number | boolean | null>).owner_name)}
-                    </span>
-                  </div>
-                )}
-                {(selectedLeadDetails as Record<string, string | number | boolean | null>).created_at && (
-                  <div className="col-span-2">
-                    <span className="text-slate-500">Created:</span>{" "}
-                    <span className="text-slate-300">
-                      {String((selectedLeadDetails as Record<string, string | number | boolean | null>).created_at)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="absolute bottom-3 left-3 z-10">
           <div className="rounded-md border border-gray-200 bg-white px-2 py-1 text-[10px] text-slate-500">
-            {graphNodes.length} nodes · {graphEdges.length} edges
+            {totalLeads > 0 ? `${totalLeads.toLocaleString()} total leads` : "Loading..."}
+            {expandedCategoryArray.length > 0 && (
+              <span className="text-slate-400"> · {expandedCategoryArray.length} categories expanded</span>
+            )}
+            {visibleLeadCount > 0 && (
+              <span className="text-slate-400"> · {visibleLeadCount} visible leads</span>
+            )}
           </div>
         </div>
 
@@ -893,7 +965,7 @@ export function GraphExplorerCanvas({ onSelectRecord, selectedNodeId: externalSe
             onToggleLabels={handleToggleLabels}
             onToggleLayout={handleToggleLayout}
             showLabels={showLabels}
-            layoutType="force"
+            layoutType="radial"
             selectedNode={selectedNodeId ? { type: "lead", id: selectedNodeId.replace("lead:", "") } : null}
             canExpand={false}
             canCollapse={false}

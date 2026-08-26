@@ -41,6 +41,8 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [explorerSelectedLeadId, setExplorerSelectedLeadId] = useState<string | null>(null);
+  const [explorerFixedGraphData, setExplorerFixedGraphData] = useState<FixedGraphData | null>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const currentRecordRef = useRef<string | null>(null);
 
@@ -51,9 +53,18 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
       const res = await fetch(`/api/graph/search?q=${encodeURIComponent(searchQuery.trim())}`);
       if (!res.ok) return [];
       const data = await res.json();
-      return (data.results || []) as Array<{ id: string; type: string; label: string; secondaryText?: string }>;
+      return (data.results || []) as Array<{ id: string; type: string; label: string; secondaryText?: string; categoryId?: string }>;
     },
     enabled: searchQuery.trim().length > 0,
+  });
+
+  const { data: aggregates } = useQuery({
+    queryKey: ["graph-aggregates"],
+    queryFn: async () => {
+      const res = await fetch("/api/graph/aggregates");
+      if (!res.ok) throw new Error("Failed to fetch aggregates");
+      return (await res.json()) as { totalLeads: number; stages: Array<{ id: string; label: string; color: string; count: number }>; sources: Array<{ id: string; label: string; color: string; count: number }>; owners: Array<{ id: string; name: string; count: number }> };
+    },
   });
 
   const handleBackToLanding = useCallback(() => {
@@ -61,6 +72,8 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
     setSelectedRecord(null);
     setFixedGraphData(null);
     setExpandedCategories(new Set());
+    setExplorerSelectedLeadId(null);
+    setExplorerFixedGraphData(null);
     onBack?.();
   }, [onBack]);
 
@@ -90,15 +103,51 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
     setSelectedRecord(null);
     setFixedGraphData(null);
     setExpandedCategories(new Set());
+    setExplorerSelectedLeadId(null);
+    setExplorerFixedGraphData(null);
   }, []);
 
-  const handleToggleCategory = useCallback((catKey: string) => {
+  const handleSelectExplorerLead = useCallback(
+    async (result: { entityType: string; entityId: string; displayName: string; secondaryText?: string }) => {
+      if (explorerSelectedLeadId === result.entityId) {
+        setExplorerSelectedLeadId(null);
+        setExplorerFixedGraphData(null);
+        return;
+      }
+
+      setExplorerSelectedLeadId(result.entityId);
+      setExplorerFixedGraphData(null);
+
+      try {
+        const res = await fetch(`/api/graph/fixed-graph?type=${result.entityType}&id=${result.entityId}`);
+        if (res.ok) {
+          const data = (await res.json()) as FixedGraphData;
+          setExplorerFixedGraphData(data);
+        }
+      } catch {
+        // Keep existing graph data visible on fetch error
+      }
+    },
+    [explorerSelectedLeadId]
+  );
+
+  const handleClearExplorerSelection = useCallback(() => {
+    setExplorerSelectedLeadId(null);
+    setExplorerFixedGraphData(null);
+  }, []);
+
+  const handleToggleCategory = useCallback((categoryKey: string) => {
+    if (categoryKey === "__reset__") {
+      setExpandedCategories(new Set());
+      return;
+    }
     setExpandedCategories((prev) => {
       const next = new Set(prev);
-      if (next.has(catKey)) {
-        next.delete(catKey);
+      if (next.has(categoryKey)) {
+        next.delete(categoryKey);
       } else {
-        next.add(catKey);
+        next.clear();
+        next.add(categoryKey);
       }
       return next;
     });
@@ -249,10 +298,10 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
     });
   }, [fixedGraphData]);
 
-  const showLeadsGraph = graphType === "leads" && viewMode === "graph" && !selectedRecord;
+  const showLeadsExplorer = graphType === "leads" && viewMode === "graph" && !selectedRecord;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
+    <div className="flex h-full min-h-0 flex-col w-full min-w-0 bg-white">
       <div className="shrink-0 px-6 pt-5 pb-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
@@ -279,6 +328,11 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
                 <span className="text-sm font-semibold truncate text-slate-900">
                   {graphType === "deals" ? "Deals" : "Leads"} Graph
                 </span>
+                {graphType === "leads" && aggregates?.totalLeads != null && (
+                  <span className="text-[11px] text-slate-500 tabular-nums">
+                    {aggregates.totalLeads.toLocaleString()} total leads
+                  </span>
+                )}
               </>
             ) : (
               <>
@@ -300,7 +354,7 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
               />
               {searchResults.length > 0 && (
                 <div className="absolute top-full end-0 mt-1 w-64 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-xl z-50">
-                  {searchResults.map((result: { id: string; type: string; label: string; secondaryText?: string }) => (
+                  {searchResults.map((result: { id: string; type: string; label: string; secondaryText?: string; categoryId?: string }) => (
                     <button
                       key={`${result.type}:${result.id}`}
                       type="button"
@@ -308,6 +362,20 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
                         e.preventDefault();
                         if (result.type === "lead") {
                           setSelectedNodeId(`lead:${result.id}`);
+                          if (result.categoryId) {
+                            const categoryKey = `category:${result.categoryId}`;
+                            setExpandedCategories((prev) => {
+                              const next = new Set(prev);
+                              next.add(categoryKey);
+                              return next;
+                            });
+                          }
+                          handleSelectExplorerLead({
+                            entityType: result.type,
+                            entityId: result.id,
+                            displayName: result.label,
+                            secondaryText: result.secondaryText,
+                          });
                         } else {
                           handleSelectRecord({
                             entityType: result.type,
@@ -362,17 +430,29 @@ export function GraphView({ initialGraphType, onBack }: GraphViewProps = {}) {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col px-6 pb-4">
-        {showLeadsGraph && (
-          <div className="flex-1 min-h-0 flex flex-col">
-            <GraphExplorerCanvas
-              onSelectRecord={handleSelectRecord}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              searchResults={searchResults}
-              selectedNodeId={selectedNodeId}
-              onSelectNode={setSelectedNodeId}
-            />
+      <div className="flex-1 min-h-0 flex flex-col px-2 pb-4">
+        {showLeadsExplorer && (
+          <div className="flex-1 min-h-0 flex flex-row gap-3">
+            <div className="flex-1 min-h-0">
+              <GraphExplorerCanvas
+                onSelectRecord={handleSelectExplorerLead}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={setSelectedNodeId}
+                expandedCategories={expandedCategories}
+                onToggleCategory={handleToggleCategory}
+                onClearSelection={handleClearExplorerSelection}
+              />
+            </div>
+            {explorerSelectedLeadId && (
+              <div className="shrink-0 w-[360px]">
+                <RecordDetailsPanel
+                  entityType="lead"
+                  entityId={explorerSelectedLeadId}
+                  fixedGraphData={explorerFixedGraphData}
+                  onSelectNode={handleSelectRecord}
+                />
+              </div>
+            )}
           </div>
         )}
 

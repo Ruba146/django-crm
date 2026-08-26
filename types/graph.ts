@@ -90,6 +90,7 @@ export interface GraphSearchResult {
   sublabel?: string;
   isAiCopy?: boolean;
   secondaryText?: string;
+  categoryId?: string;
 }
 
 export const NODE_TYPE_CONFIG: Record<EntityType, { label: string; color: string; table: string }> = {
@@ -142,6 +143,41 @@ export interface LeadAggregates {
   sources: Array<{ id: string; label: string; color: string; count: number }>;
   owners: Array<{ id: string; name: string; count: number }>;
 }
+
+export interface LeadCategory {
+  id: string;
+  label: string;
+  color: string;
+  count: number;
+}
+
+export interface CategoryLeadsResponse {
+  records: Array<{
+    entityType: string;
+    entityId: string;
+    displayName: string;
+    secondaryText?: string;
+  }>;
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export const LEAD_CATEGORIES = [
+  { id: "technology", label: "Technology & Software", color: "#3b82f6" },
+  { id: "retail", label: "Retail & E-commerce", color: "#f59e0b" },
+  { id: "finance", label: "Finance & Banking", color: "#10b981" },
+  { id: "healthcare", label: "Healthcare & Medical", color: "#ef4444" },
+  { id: "education", label: "Education & Training", color: "#8b5cf6" },
+  { id: "real_estate", label: "Real Estate & Construction", color: "#f97316" },
+  { id: "marketing", label: "Marketing & Media", color: "#ec4899" },
+  { id: "professional_services", label: "Professional Services", color: "#6366f1" },
+  { id: "food_hospitality", label: "Food & Hospitality", color: "#84cc16" },
+  { id: "industrial_logistics", label: "Industrial & Logistics", color: "#64748b" },
+] as const;
+
+export type LeadCategoryId = (typeof LEAD_CATEGORIES)[number]["id"];
 
 export const MEMORY_TYPE_CONFIG: Record<MemoryType, { label: string; color: string }> = {
   decision: { label: "Decision", color: "#dc2626" },

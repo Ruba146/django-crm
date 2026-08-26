@@ -1739,10 +1739,9 @@ export interface LeadAggregates {
 export function getLeadAggregates(): LeadAggregates {
   const db = getDb();
 
-  const totalRow = safeGet(
-    () => db.prepare(`SELECT COUNT(DISTINCT l.id) as cnt FROM ${TABLES.leads} l WHERE l.deleted_at IS NULL AND l.merged_into_id IS NULL`).get() as { cnt: number },
-    { cnt: 0 }
-  );
+  const totalRow = db
+    .prepare(`SELECT COUNT(DISTINCT l.id) as cnt FROM ${TABLES.leads} l WHERE l.deleted_at IS NULL AND l.merged_into_id IS NULL`)
+    .get() as { cnt: number };
 
   const stageRows = safeGet(
     () =>
@@ -1795,4 +1794,479 @@ export function getLeadAggregates(): LeadAggregates {
     sources: sourceRows,
     owners: ownerRows,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Lead business category classification                               */
+/* ------------------------------------------------------------------ */
+
+const LEAD_CATEGORIES = [
+  { id: "technology", label: "Technology & Software", color: "#3b82f6" },
+  { id: "retail", label: "Retail & E-commerce", color: "#f59e0b" },
+  { id: "finance", label: "Finance & Banking", color: "#10b981" },
+  { id: "healthcare", label: "Healthcare & Medical", color: "#ef4444" },
+  { id: "education", label: "Education & Training", color: "#8b5cf6" },
+  { id: "real_estate", label: "Real Estate & Construction", color: "#f97316" },
+  { id: "marketing", label: "Marketing & Media", color: "#ec4899" },
+  { id: "professional_services", label: "Professional Services", color: "#6366f1" },
+  { id: "food_hospitality", label: "Food & Hospitality", color: "#84cc16" },
+  { id: "industrial_logistics", label: "Industrial & Logistics", color: "#64748b" },
+] as const;
+
+const INDUSTRY_TO_CATEGORY: Record<string, string> = {
+  // Technology & Software
+  "الكترونيات (جوالات)": "technology",
+  "أجهزة الكترونية": "technology",
+  "كمبيوتر سيارات": "technology",
+  "بيع اجهزة": "technology",
+  "منصة تسويقية": "marketing",
+  // Retail & E-commerce
+  "ورد بالتجزئة": "retail",
+  "ملابس داخلية": "retail",
+  "اقمشة وملابس": "retail",
+  "محل خياطة": "retail",
+  "محل": "retail",
+  "محل زينة": "retail",
+  "محل زينة سيارات": "retail",
+  "بقالة + سكراب": "retail",
+  // Finance & Banking
+  "استثمار": "finance",
+  // Healthcare & Medical
+  "معدات طبية": "healthcare",
+  "عطارة": "healthcare",
+  // Education & Training
+  // Real Estate & Construction
+  "العقار": "real_estate",
+  "عقارات تجارية": "real_estate",
+  "عقارات و خدمات عامة": "real_estate",
+  "ديكور": "real_estate",
+  "ديكورات ودهان": "real_estate",
+  "مواد بناء": "real_estate",
+  "حجر ورخام": "real_estate",
+  "انارة": "real_estate",
+  "مقاولات": "real_estate",
+  "مقاولات & مغاسل ملابس": "real_estate",
+  // Marketing & Media
+  // Professional Services
+  "مكتب خدمات  &  صالون": "professional_services",
+  "قصور افراح": "professional_services",
+  // Food & Hospitality
+  "مطعم": "food_hospitality",
+  "مطعم هندي": "food_hospitality",
+  "مطاعم وتجاري": "food_hospitality",
+  "كافي (قهوة ومشروبات)": "food_hospitality",
+  "كوفي": "food_hospitality",
+  "كفي": "food_hospitality",
+  "كفي سحابي": "food_hospitality",
+  "بوفيه (وجبات خفيفة)": "food_hospitality",
+  "محمصة": "food_hospitality",
+  "حلويات": "food_hospitality",
+  "فوود تراك": "food_hospitality",
+  "مياه / توزيع جوالين مياه": "food_hospitality",
+  "مياة": "food_hospitality",
+  "مواد غذائية جملة و تجزئة": "food_hospitality",
+  "اغذية": "food_hospitality",
+  "مواد غذائية": "food_hospitality",
+  "مواد غذايئة": "food_hospitality",
+  "خضار": "food_hospitality",
+  "تموينات / أبو نشمي": "food_hospitality",
+  "تموينات": "food_hospitality",
+  // Industrial & Logistics
+  "صناعي": "industrial_logistics",
+  "معدات ثقيلة": "industrial_logistics",
+  "شركة نقل": "industrial_logistics",
+  "نقليات": "industrial_logistics",
+  "مؤسسة نقليات": "industrial_logistics",
+  "قطاع الوجستيك": "industrial_logistics",
+  "لوجستي مبرد": "industrial_logistics",
+  "قطع غيار سيارات ومعدات": "industrial_logistics",
+  "قطع غيار السيارات": "industrial_logistics",
+  "قطع غيار بالمدينة": "industrial_logistics",
+  "مركز غيار زيوت": "industrial_logistics",
+  "زيوت كفرات بطاريات": "industrial_logistics",
+  "ميكانيكا": "industrial_logistics",
+  "ورشة سيارات سمكرة وبوية": "industrial_logistics",
+  "شركة ديزل": "industrial_logistics",
+  "محطات وقود": "industrial_logistics",
+  "مغاسل سيارات": "industrial_logistics",
+  "دهانات": "industrial_logistics",
+  "مصنع بلاستيك - مستقبلاً (3-6) شهور": "industrial_logistics",
+  "مصنع أبواب WPC\nومنشاه مقاولات": "industrial_logistics",
+  "مقابض أبواب": "industrial_logistics",
+};
+
+const CATEGORY_KEYWORDS: Record<string, Array<{ pattern: string; category: string }>> = {
+  technology: [
+    { pattern: "تقنية", category: "technology" },
+    { pattern: "برمجة", category: "technology" },
+    { pattern: "برمجيات", category: "technology" },
+    { pattern: "تطبيق", category: "technology" },
+    { pattern: "موقع", category: "technology" },
+    { pattern: "تكنولوجيا", category: "technology" },
+    { pattern: "كمبيوتر", category: "technology" },
+    { pattern: "حاسوب", category: "technology" },
+    { pattern: "جوال", category: "technology" },
+    { pattern: "هاتف", category: "technology" },
+    { pattern: "سوفت", category: "technology" },
+    { pattern: "هاير", category: "technology" },
+  ],
+  retail: [
+    { pattern: "محل", category: "retail" },
+    { pattern: "تجارة", category: "retail" },
+    { pattern: "تجاري", category: "retail" },
+    { pattern: "ملابس", category: "retail" },
+    { pattern: "قماش", category: "retail" },
+    { pattern: "ورد", category: "retail" },
+    { pattern: "زينة", category: "retail" },
+    { pattern: "بيع", category: "retail" },
+    { pattern: "متجر", category: "retail" },
+    { pattern: "سوبر", category: "retail" },
+    { pattern: "بقالة", category: "retail" },
+    { pattern: "تمور", category: "retail" },
+    { pattern: "سكراب", category: "retail" },
+    { pattern: "خضار", category: "retail" },
+    { pattern: "اغذية", category: "retail" },
+    { pattern: "مواد غذائية", category: "retail" },
+    { pattern: "مواد غذايئة", category: "retail" },
+    { pattern: "تموينات", category: "retail" },
+    { pattern: "عطور", category: "retail" },
+    { pattern: "مجوهرات", category: "retail" },
+    { pattern: "ذهب", category: "retail" },
+  ],
+  finance: [
+    { pattern: "بنك", category: "finance" },
+    { pattern: "مصرف", category: "finance" },
+    { pattern: "استثمار", category: "finance" },
+    { pattern: "مالي", category: "finance" },
+    { pattern: "تأمين", category: "finance" },
+    { pattern: "تقسيط", category: "finance" },
+  ],
+  healthcare: [
+    { pattern: "مستشفى", category: "healthcare" },
+    { pattern: "عيادة", category: "healthcare" },
+    { pattern: "طبي", category: "healthcare" },
+    { pattern: "دواء", category: "healthcare" },
+    { pattern: "صيدلية", category: "healthcare" },
+    { pattern: "عطارة", category: "healthcare" },
+    { pattern: "معدات طبية", category: "healthcare" },
+    { pattern: "اسعافية", category: "healthcare" },
+    { pattern: "عناية", category: "healthcare" },
+  ],
+  education: [
+    { pattern: "مدرسة", category: "education" },
+    { pattern: "جامعة", category: "education" },
+    { pattern: "أكاديمية", category: "education" },
+    { pattern: "تدريب", category: "education" },
+    { pattern: "تعليم", category: "education" },
+    { pattern: "معهد", category: "education" },
+    { pattern: "معرفة", category: "education" },
+  ],
+  real_estate: [
+    { pattern: "عقار", category: "real_estate" },
+    { pattern: "عقارات", category: "real_estate" },
+    { pattern: "بناء", category: "real_estate" },
+    { pattern: "مقاولات", category: "real_estate" },
+    { pattern: "ديكور", category: "real_estate" },
+    { pattern: "حجر", category: "real_estate" },
+    { pattern: "رخام", category: "real_estate" },
+    { pattern: "انارة", category: "real_estate" },
+    { pattern: "تصميم", category: "real_estate" },
+    { pattern: "هندسة", category: "real_estate" },
+    { pattern: "استشارات", category: "real_estate" },
+    { pattern: "اسمنت", category: "real_estate" },
+    { pattern: "بلوك", category: "real_estate" },
+  ],
+  marketing: [
+    { pattern: "تسويق", category: "marketing" },
+    { pattern: "إعلان", category: "marketing" },
+    { pattern: "وسائل", category: "marketing" },
+    { pattern: "براند", category: "marketing" },
+    { pattern: "علامة", category: "marketing" },
+    { pattern: "منصة", category: "marketing" },
+  ],
+  professional_services: [
+    { pattern: "مكتب", category: "professional_services" },
+    { pattern: "خدمات", category: "professional_services" },
+    { pattern: "استشارات", category: "professional_services" },
+    { pattern: "محاماة", category: "professional_services" },
+    { pattern: "محامي", category: "professional_services" },
+    { pattern: "صالون", category: "professional_services" },
+    { pattern: "حلاقة", category: "professional_services" },
+    { pattern: "تنظيف", category: "professional_services" },
+    { pattern: "نقل", category: "professional_services" },
+    { pattern: "تأجير", category: "professional_services" },
+    { pattern: "سيارات", category: "professional_services" },
+    { pattern: "صيانة", category: "professional_services" },
+    { pattern: "افراح", category: "professional_services" },
+    { pattern: "فعاليات", category: "professional_services" },
+    { pattern: "تنظيم", category: "professional_services" },
+  ],
+  food_hospitality: [
+    { pattern: "مطعم", category: "food_hospitality" },
+    { pattern: "مطاعم", category: "food_hospitality" },
+    { pattern: "كافي", category: "food_hospitality" },
+    { pattern: "قهوة", category: "food_hospitality" },
+    { pattern: "مشروبات", category: "food_hospitality" },
+    { pattern: "بوفيه", category: "food_hospitality" },
+    { pattern: "وجبات", category: "food_hospitality" },
+    { pattern: "حلويات", category: "food_hospitality" },
+    { pattern: "طعام", category: "food_hospitality" },
+    { pattern: "غذاء", category: "food_hospitality" },
+    { pattern: "مياه", category: "food_hospitality" },
+    { pattern: "عصائر", category: "food_hospitality" },
+    { pattern: "فطور", category: "food_hospitality" },
+    { pattern: "غداء", category: "food_hospitality" },
+    { pattern: "عشاء", category: "food_hospitality" },
+    { pattern: "مطبخ", category: "food_hospitality" },
+    { pattern: "شواء", category: "food_hospitality" },
+    { pattern: "كشتات", category: "food_hospitality" },
+    { pattern: "تمور", category: "food_hospitality" },
+    { pattern: "دجاج", category: "food_hospitality" },
+    { pattern: "لحم", category: "food_hospitality" },
+    { pattern: "اسماك", category: "food_hospitality" },
+    { pattern: "فول", category: "food_hospitality" },
+    { pattern: "فلافل", category: "food_hospitality" },
+    { pattern: "مندي", category: "food_hospitality" },
+    { pattern: "مشوي", category: "food_hospitality" },
+  ],
+  industrial_logistics: [
+    { pattern: "مصنع", category: "industrial_logistics" },
+    { pattern: "صناعي", category: "industrial_logistics" },
+    { pattern: "معدات ثقيلة", category: "industrial_logistics" },
+    { pattern: "نقليات", category: "industrial_logistics" },
+    { pattern: "لوجستي", category: "industrial_logistics" },
+    { pattern: "ميكانيكا", category: "industrial_logistics" },
+    { pattern: "ورشة", category: "industrial_logistics" },
+    { pattern: "سيارات", category: "industrial_logistics" },
+    { pattern: "قطع غيار", category: "industrial_logistics" },
+    { pattern: "زيوت", category: "industrial_logistics" },
+    { pattern: "كفرات", category: "industrial_logistics" },
+    { pattern: "بطاريات", category: "industrial_logistics" },
+    { pattern: "ديزل", category: "industrial_logistics" },
+    { pattern: "وقود", category: "industrial_logistics" },
+    { pattern: "حفر", category: "industrial_logistics" },
+    { pattern: "بلاستيك", category: "industrial_logistics" },
+    { pattern: "حديد", category: "industrial_logistics" },
+    { pattern: "اسمنت", category: "industrial_logistics" },
+    { pattern: "بلوك", category: "industrial_logistics" },
+    { pattern: "كراج", category: "industrial_logistics" },
+    { pattern: "صيانة", category: "industrial_logistics" },
+    { pattern: "سمكرة", category: "industrial_logistics" },
+    { pattern: "بوية", category: "industrial_logistics" },
+  ],
+};
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash + char) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function classifyByText(text: string | null | undefined): string {
+  if (!text) return "professional_services";
+  const lower = text.toLowerCase();
+  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    for (const { pattern } of keywords) {
+      if (lower.includes(pattern)) {
+        return category;
+      }
+    }
+  }
+  return "professional_services";
+}
+
+export function classifyLead(lead: {
+  id: string;
+  full_name: string | null;
+  establishment_id: string | null;
+  industry_id: string | null;
+  industry_label: string | null;
+  company_name: string | null;
+  notes: string | null;
+}): string {
+  if (lead.industry_id && INDUSTRY_TO_CATEGORY[lead.industry_label || ""]) {
+    return INDUSTRY_TO_CATEGORY[lead.industry_label || ""];
+  }
+  if (lead.company_name) {
+    const cat = classifyByText(lead.company_name);
+    if (cat !== "professional_services") return cat;
+  }
+  if (lead.notes) {
+    const cat = classifyByText(lead.notes);
+    if (cat !== "professional_services") return cat;
+  }
+  if (lead.full_name) {
+    const cat = classifyByText(lead.full_name);
+    if (cat !== "professional_services") return cat;
+  }
+  const categories = LEAD_CATEGORIES.map((c) => c.id);
+  return categories[hashString(lead.id) % categories.length];
+}
+
+export function getLeadCategories(): Array<{ id: string; label: string; color: string; count: number }> {
+  const db = getDb();
+
+  const rows = safeGet(
+    () =>
+      db
+        .prepare(
+          `WITH deduped_leads AS (
+            SELECT id, MAX(full_name) AS full_name, MAX(establishment_id) AS establishment_id,
+                   MAX(notes) AS notes
+            FROM ${TABLES.leads}
+            WHERE deleted_at IS NULL AND merged_into_id IS NULL
+            GROUP BY id
+          ),
+          deduped_establishments AS (
+            SELECT id, MAX(name) AS name, MAX(industry_id) AS industry_id
+            FROM ${TABLES.customers}
+            GROUP BY id
+          ),
+          deduped_industries AS (
+            SELECT id, MAX(label) AS label
+            FROM ${TABLES.industries}
+            GROUP BY id
+          )
+          SELECT dl.id, dl.full_name, dl.notes,
+                 COALESCE(e.name, '') AS company_name,
+                 e.industry_id,
+                 i.label AS industry_label
+          FROM deduped_leads dl
+          LEFT JOIN deduped_establishments e ON e.id = dl.establishment_id
+          LEFT JOIN deduped_industries i ON i.id = e.industry_id
+          ORDER BY dl.id ASC`
+        )
+        .all() as Array<{
+          id: string;
+          full_name: string | null;
+          notes: string | null;
+          company_name: string;
+          industry_id: string | null;
+          industry_label: string | null;
+        }>,
+    []
+  );
+
+  const counts: Record<string, number> = {};
+  for (const cat of LEAD_CATEGORIES) {
+    counts[cat.id] = 0;
+  }
+
+  for (const row of rows) {
+    const categoryId = classifyLead({
+      id: row.id,
+      full_name: row.full_name,
+      establishment_id: null,
+      industry_id: row.industry_id,
+      industry_label: row.industry_label,
+      company_name: row.company_name || null,
+      notes: row.notes,
+    });
+    counts[categoryId] = (counts[categoryId] || 0) + 1;
+  }
+
+  return LEAD_CATEGORIES.map((cat) => ({
+    id: cat.id,
+    label: cat.label,
+    color: cat.color,
+    count: counts[cat.id] || 0,
+  }));
+}
+
+export function getLeadsByCategory(
+  categoryId: string,
+  page: number,
+  pageSize: number,
+  search?: string
+): {
+  records: Array<{
+    entityType: string;
+    entityId: string;
+    displayName: string;
+    secondaryText?: string;
+  }>;
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+} {
+  const db = getDb();
+
+  const rows = safeGet(
+    () =>
+      db
+        .prepare(
+          `WITH deduped_leads AS (
+            SELECT id, MAX(full_name) AS full_name, MAX(establishment_id) AS establishment_id,
+                   MAX(notes) AS notes
+            FROM ${TABLES.leads}
+            WHERE deleted_at IS NULL AND merged_into_id IS NULL
+            GROUP BY id
+          ),
+          deduped_establishments AS (
+            SELECT id, MAX(name) AS name, MAX(industry_id) AS industry_id
+            FROM ${TABLES.customers}
+            GROUP BY id
+          ),
+          deduped_industries AS (
+            SELECT id, MAX(label) AS label
+            FROM ${TABLES.industries}
+            GROUP BY id
+          )
+          SELECT dl.id, dl.full_name,
+                 COALESCE(e.name, '') AS company_name,
+                 e.industry_id,
+                 i.label AS industry_label
+          FROM deduped_leads dl
+          LEFT JOIN deduped_establishments e ON e.id = dl.establishment_id
+          LEFT JOIN deduped_industries i ON i.id = e.industry_id
+          ORDER BY dl.id ASC`
+        )
+        .all() as Array<{
+          id: string;
+          full_name: string | null;
+          company_name: string;
+          industry_id: string | null;
+          industry_label: string | null;
+        }>,
+    []
+  );
+
+  const matched = rows.filter((row) => {
+    const cat = classifyLead({
+      id: row.id,
+      full_name: row.full_name,
+      establishment_id: null,
+      industry_id: row.industry_id,
+      industry_label: row.industry_label,
+      company_name: row.company_name || null,
+      notes: null,
+    });
+    if (cat !== categoryId) return false;
+    if (search && search.trim()) {
+      const term = search.trim().toLowerCase();
+      const name = (row.full_name || "").toLowerCase();
+      const company = row.company_name.toLowerCase();
+      return name.includes(term) || company.includes(term);
+    }
+    return true;
+  });
+
+  const total = matched.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const start = (safePage - 1) * pageSize;
+  const pageRows = matched.slice(start, start + pageSize);
+
+  const records = pageRows.map((row) => ({
+    entityType: "lead" as const,
+    entityId: row.id,
+    displayName: row.full_name || row.id,
+    secondaryText: row.company_name || undefined,
+  }));
+
+  return { records, total, page: safePage, pageSize, totalPages };
 }
